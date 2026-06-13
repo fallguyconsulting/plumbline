@@ -15,6 +15,8 @@
         "name": "Fall Guy Consulting"
       },
       "license": "Apache-2.0",
+      "homepage": "https://github.com/fallguyconsulting/plumbline",
+      "repository": "https://github.com/fallguyconsulting/plumbline",
       "keywords": [
         "lint",
         "style",

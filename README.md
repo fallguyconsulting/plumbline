@@ -9,7 +9,7 @@ Plumbline is a methodology for writing code that AI coding agents can safely mai
 This repository is its own single-plugin marketplace (the catalog lives at `.claude-plugin/marketplace.json` under the marketplace name `fallguy`). In Claude Code:
 
 ```
-/plugin marketplace add <git-url-of-this-repo>
+/plugin marketplace add fallguyconsulting/plumbline
 /plugin install plumbline@fallguy
 ```
 
