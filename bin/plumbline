@@ -783,9 +783,10 @@ function patternsCmd(target) {
     console.log('plumbline: no violations to cluster');
     process.exit(0);
   }
+  const fileCache = {};
   const buckets = {};
   for (const v of violations) {
-    const key = patternKey(v);
+    const key = patternKey(v, fileCache);
     if (!buckets[key]) buckets[key] = { code: v.code, signature: key, count: 0, samples: [] };
     buckets[key].count++;
     if (buckets[key].samples.length < 3) buckets[key].samples.push(`${v.file}:${v.line}`);
@@ -802,7 +803,7 @@ function patternsCmd(target) {
   process.exit(sorted.length > 0 ? 2 : 0);
 }
 
-function patternKey(v) {
+function patternKey(v, fileCache) {
   if (v.code === 'source-missing-file' || v.code === 'source-missing-symbol') {
     const m = v.message.match(/file ([^\s]+)/) || v.message.match(/"([^"]+)" not found in ([^\s]+)/);
     if (m) {
@@ -817,9 +818,61 @@ function patternKey(v) {
     return m ? `slug:${m[1]}` : 'unparsed-invariant';
   }
   if (v.code === 'comment-hygiene') {
-    return 'untagged-comment';
+    return commentHygieneShape(v, fileCache || {});
   }
   return v.code;
+}
+
+function commentHygieneShape(v, fileCache) {
+  if (!fileCache[v.file]) {
+    try {
+      fileCache[v.file] = fs.readFileSync(v.file, 'utf8').split('\n');
+    } catch (e) {
+      return 'untagged-prose';
+    }
+  }
+  const lines = fileCache[v.file];
+  if (!lines || v.line < 1 || v.line > lines.length) return 'untagged-prose';
+  const startLine = lines[v.line - 1] || '';
+  const blockText = lines.slice(v.line - 1, Math.min(v.line + 4, lines.length)).join(' ');
+  const stripped = startLine.replace(/^[\s/*#]+/, '').trim();
+
+  if (startLine.trim().length >= 8 && /^[\s/*#=\-+~_.]+$/.test(startLine) && !/[A-Za-z0-9]/.test(stripped)) {
+    return 'divider';
+  }
+  if (/\b(Copyright|All rights reserved|Licensed under|SPDX-License)/i.test(blockText)) {
+    return 'license-fragment';
+  }
+  if (/\b(TODO|FIXME|HACK|XXX)\b/.test(blockText)) {
+    return 'todo-marker';
+  }
+  if (isLikelyCode(stripped)) {
+    return 'commented-out-code';
+  }
+  const ext = path.extname(v.file).toLowerCase();
+  if (['.go', '.ts', '.tsx', '.js', '.jsx'].includes(ext)) {
+    for (let i = v.line; i < Math.min(v.line + 10, lines.length); i++) {
+      const ln = (lines[i] || '').trim();
+      if (!ln) continue;
+      if (ln.startsWith('//') || ln.startsWith('/*') || ln.startsWith('*')) continue;
+      if (ext === '.go' && /^(func|type|var|const|package|import)\b/.test(ln)) return 'doc-residue';
+      if (['.ts', '.tsx', '.js', '.jsx'].includes(ext) &&
+          /^(export\s+|async\s+)?(function|class|const|let|var|interface|type|enum|namespace)\b/.test(ln)) {
+        return 'doc-residue';
+      }
+      break;
+    }
+  }
+  return 'untagged-prose';
+}
+
+function isLikelyCode(text) {
+  if (!text) return false;
+  if (/^(func|var|const|if|for|return|package|import|type|class|function|let|else|switch|case|default|break|continue|defer|go|select)\b/.test(text)) return true;
+  if (/^\w+\s*:=/.test(text)) return true;
+  if (/^[a-zA-Z_$][\w$]*\s*\(/.test(text) && /[){};]/.test(text)) return true;
+  if (/^[{}]$/.test(text)) return true;
+  return false;
 }
 
 const SUGGEST_HEURISTICS = [
