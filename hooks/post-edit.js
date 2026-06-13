@@ -1,5 +1,7 @@
 #!/usr/bin/env node
 
+// SPDX-License-Identifier: Apache-2.0
+
 // @agent-contract
 // - PostToolUse hook for Edit and Write. Reads the tool-call event from stdin,
 //   extracts the edited file path, runs `plumbline` on just that file, and exits 2

@@ -1,0 +1,29 @@
+{
+  "$schema": "https://code.claude.com/schemas/marketplace.json",
+  "name": "fallguy",
+  "owner": {
+    "name": "Fall Guy Consulting"
+  },
+  "description": "Fall Guy Consulting plugins for Claude Code.",
+  "plugins": [
+    {
+      "name": "plumbline",
+      "source": "./",
+      "displayName": "Plumbline",
+      "description": "Code that runs true under agentic maintenance. Ships the methodology rules (manifesto, style guide, cheatsheet), an idempotent affirm skill, a multi-language lint binary (comment hygiene, @source: validity, @blessed-invariant: test coverage), a PostToolUse hook, and an /plumbline:audit skill.",
+      "author": {
+        "name": "Fall Guy Consulting"
+      },
+      "license": "Apache-2.0",
+      "keywords": [
+        "lint",
+        "style",
+        "agentic",
+        "code-quality",
+        "claude-code",
+        "rules"
+      ],
+      "category": "code-quality"
+    }
+  ]
+}

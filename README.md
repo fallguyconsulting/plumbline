@@ -4,15 +4,26 @@
 
 Plumbline is a methodology for writing code that AI coding agents can safely maintain in parallel, across model generations, and at scale. It packages as a Claude Code plugin that installs the project rules into any consuming codebase, with lint tooling to follow.
 
+## Install
+
+This repository is its own single-plugin marketplace (the catalog lives at `.claude-plugin/marketplace.json` under the marketplace name `fallguy`). In Claude Code:
+
+```
+/plugin marketplace add <git-url-of-this-repo>
+/plugin install plumbline@fallguy
+```
+
 ## Quick start
 
-Install the plugin via your Claude Code marketplace, then in any project run:
+In any project:
 
 ```
 /plumbline:affirm
 ```
 
 This writes `.claude/rules/plumbline-cheatsheet.md` into the current project — the rules file every Claude Code session in the project will read. Commit it. Re-run `/plumbline:affirm` after a plugin upgrade to pick up the latest canonical cheatsheet.
+
+With the plugin installed, the `PostToolUse` hook runs `plumbline` on every Edit/Write automatically and blocks (exit 2) when violations are found, so the agent sees the message and fixes in the same turn.
 
 ## Documents
 
