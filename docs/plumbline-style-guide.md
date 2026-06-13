@@ -119,7 +119,7 @@ Copying code is permitted in exactly one situation: two pieces of code are **coi
 
 In that situation:
 
-- Annotate the copy: `@source: path/to/file:symbol`
+- Annotate the copy: `@source: path/to/file::symbol` (`::` is preferred; single `:` is accepted for back-compat)
 - When the copy diverges, mark it: `@diverged: true` + `@reason: <why>`
 - When modifying a canonical source, grep for its `@source:` references and visit each copy — apply, or mark diverged with a reason.
 
@@ -376,7 +376,7 @@ Named cross-cutting invariant at its enforcement site; must have an exercising t
 ### @source: / @diverged: / @reason:
 Tracked mirror of semantically independent code (narrow use only).
 ```python
-# @source: path/to/file:symbol
+# @source: path/to/file::symbol
 # @diverged: true
 # @reason: drivers intentionally differ in SQL dialect
 ```

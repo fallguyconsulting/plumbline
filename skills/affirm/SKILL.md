@@ -23,7 +23,7 @@ The rules file is skill-owned boilerplate. Local edits to `.claude/rules/plumbli
 ```bash
 set -euo pipefail
 
-canonical="${CLAUDE_PLUGIN_ROOT}/docs/plumbline-cheatsheet.md"
+canonical="${CLAUDE_PLUGIN_ROOT%/}/docs/plumbline-cheatsheet.md"
 
 if [ ! -f "$canonical" ]; then
   echo "error: canonical cheatsheet not found at $canonical" >&2

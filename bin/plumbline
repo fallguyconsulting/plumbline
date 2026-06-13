@@ -140,6 +140,7 @@ function shouldIgnore(filePath, repoRoot, ignorePatterns) {
 function* walkFiles(target, repoRoot, ignorePatterns) {
   const stat = fs.statSync(target);
   if (stat.isFile()) {
+    if (shouldIgnore(target, repoRoot, ignorePatterns)) return;
     if (COMMENT_GRAMMARS[path.extname(target)]) yield target;
     return;
   }
@@ -300,14 +301,20 @@ function checkSourceValidity(repoRoot, files) {
   for (const file of files) {
     const content = fs.readFileSync(file, 'utf8');
     for (const ref of parseSourceRefs(file, content)) {
-      const colonIdx = ref.ref.lastIndexOf(':');
       let filePart, symbolPart;
-      if (colonIdx > 0 && ref.ref.indexOf('/') < colonIdx) {
-        filePart = ref.ref.slice(0, colonIdx);
-        symbolPart = ref.ref.slice(colonIdx + 1);
+      const doubleColonIdx = ref.ref.lastIndexOf('::');
+      if (doubleColonIdx > 0) {
+        filePart = ref.ref.slice(0, doubleColonIdx);
+        symbolPart = ref.ref.slice(doubleColonIdx + 2);
       } else {
-        filePart = ref.ref;
-        symbolPart = null;
+        const colonIdx = ref.ref.lastIndexOf(':');
+        if (colonIdx > 0 && ref.ref.indexOf('/') < colonIdx) {
+          filePart = ref.ref.slice(0, colonIdx);
+          symbolPart = ref.ref.slice(colonIdx + 1);
+        } else {
+          filePart = ref.ref;
+          symbolPart = null;
+        }
       }
       const targetPath = path.resolve(repoRoot, filePart);
       if (!fs.existsSync(targetPath)) {

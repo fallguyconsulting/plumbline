@@ -38,6 +38,7 @@ run_case "invariant-covered"      "$fixtures/invariant-covered"      0 ""
 run_case "comment-hygiene"        "$fixtures/comment-hygiene"        2 "plumbline/comment-hygiene"
 run_case "source-missing-file"    "$fixtures/source-missing-file"    2 "plumbline/source-missing-file"
 run_case "source-missing-symbol"  "$fixtures/source-missing-symbol"  2 "plumbline/source-missing-symbol"
+run_case "source-missing-symbol-doublecolon" "$fixtures/source-missing-symbol-doublecolon" 2 "plumbline/source-missing-symbol"
 run_case "invariant-uncovered"    "$fixtures/invariant-uncovered"    2 "plumbline/blessed-invariant-uncovered"
 
 if [ $fail -eq 0 ]; then

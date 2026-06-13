@@ -21,7 +21,7 @@ Run the Plumbline lint across the current project and analyze the findings.
 
 ```bash
 set +e
-output=$(node "${CLAUDE_PLUGIN_ROOT}/bin/plumbline" . 2>&1)
+output=$(node "${CLAUDE_PLUGIN_ROOT%/}/bin/plumbline" . 2>&1)
 exit_code=$?
 
 echo "$output"
