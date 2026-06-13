@@ -289,6 +289,38 @@ function nextNonCommentLine(allLines, fromLineNumber, grammar) {
   return null;
 }
 
+const JSDOC_DECL_PATTERNS = [
+  /^\s*(?:export\s+)?(?:default\s+)?(?:async\s+)?function\s+\w+/,
+  /^\s*(?:export\s+)?(?:default\s+)?(?:abstract\s+)?class\s+\w+/,
+  /^\s*(?:export\s+)?interface\s+\w+/,
+  /^\s*(?:export\s+)?type\s+\w+/,
+  /^\s*(?:export\s+)?(?:async\s+)?(?:const|let|var)\s+\w+/,
+  /^\s*(?:export\s+)?enum\s+\w+/,
+  /^\s*(?:export\s+)?namespace\s+\w+/,
+  /^\s*(?:public|private|protected|readonly)\s+(?:static\s+)?(?:async\s+)?\w+/,
+  /^\s*(?:static\s+)?(?:async\s+)?\w+\s*\(/,
+  /^\s*\w+\s*[:=?]/,
+];
+
+const JSDOC_GRAMMARS = new Set([
+  COMMENT_GRAMMARS['.ts'],
+  COMMENT_GRAMMARS['.tsx'],
+  COMMENT_GRAMMARS['.js'],
+  COMMENT_GRAMMARS['.jsx'],
+  COMMENT_GRAMMARS['.mjs'],
+  COMMENT_GRAMMARS['.cjs'],
+]);
+
+function isJsDocStyle(comment, allLines, grammar) {
+  if (!JSDOC_GRAMMARS.has(grammar)) return false;
+  if (comment.kind !== 'block') return false;
+  const first = firstSignificantLine(comment.text);
+  if (!first || !/^[A-Z]/.test(first)) return false;
+  const nextLine = nextNonCommentLine(allLines, commentEndLine(comment), grammar);
+  if (!nextLine) return false;
+  return JSDOC_DECL_PATTERNS.some((re) => re.test(nextLine));
+}
+
 function isGoDocStyle(comment, allLines, grammar) {
   if (grammar !== COMMENT_GRAMMARS['.go']) return false;
   const first = firstSignificantLine(comment.text);
@@ -320,6 +352,7 @@ function checkCommentHygiene(filePath, content, grammar, config) {
   for (const c of extractComments(content, grammar)) {
     if (isCompliantComment(c.text, config.tags)) continue;
     if (isGoDocStyle(c, allLines, grammar)) continue;
+    if (isJsDocStyle(c, allLines, grammar)) continue;
     violations.push({
       file: filePath,
       line: c.line,

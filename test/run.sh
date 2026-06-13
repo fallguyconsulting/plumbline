@@ -36,6 +36,7 @@ run_case() {
 run_case "clean"                  "$fixtures/clean"                  0 ""
 run_case "invariant-covered"      "$fixtures/invariant-covered"      0 ""
 run_case "godoc-clean"            "$fixtures/godoc-clean"            0 ""
+run_case "jsdoc-clean"            "$fixtures/jsdoc-clean"            0 ""
 run_case "comment-hygiene"        "$fixtures/comment-hygiene"        2 "plumbline/comment-hygiene"
 run_case "source-missing-file"    "$fixtures/source-missing-file"    2 "plumbline/source-missing-file"
 run_case "source-missing-symbol"  "$fixtures/source-missing-symbol"  2 "plumbline/source-missing-symbol"

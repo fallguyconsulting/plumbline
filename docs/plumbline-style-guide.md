@@ -167,7 +167,7 @@ The rule, which is lint-enforceable:
 
 - **Every comment begins with a structured tag** from the vocabulary below (projects may extend it).
 - **Machine directives are exempt**: build tags, generate directives, lint suppressions, license headers (Copyright/SPDX/Licensed-under/Dual-licensed lines).
-- **Language documentation conventions are exempt**: for Go, the lint recognizes GoDoc-style comments (a comment whose first word names the declaration on the next non-comment line — `func Foo`, `type Bar`, `var Baz`, `const Quux`, struct fields, or the program-name comment preceding `package main`).
+- **Language documentation conventions are exempt**: for Go, the lint recognizes GoDoc-style comments (a comment whose first word names the declaration on the next non-comment line — `func Foo`, `type Bar`, `var Baz`, `const Quux`, struct fields, or the program-name comment preceding `package main`). For TypeScript/JavaScript, block comments (`/* */` / `/** */`) that open with a capitalized word and directly precede an exported or top-level declaration (`function`, `class`, `interface`, `type`, `const`/`let`/`var`, `enum`, `namespace`, methods, fields) are recognized as JSDoc-style documentation.
 - **Anything else is residue** — delete it on sight, including in code you didn't write (it will be regenerated as precedent otherwise).
 
 If information feels like it needs a comment but fits no tag, it belongs in a better name, a type, or nowhere.
