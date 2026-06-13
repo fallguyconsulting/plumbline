@@ -44,6 +44,9 @@ const MACHINE_DIRECTIVE_PATTERNS = {
   denoSuppression:       /^\s*deno-/,
   copyrightBanner:       /^!/,
   shebang:               /^!\s*\//,
+  copyrightLine:         /^\s*Copyright\b/,
+  dualLicensedLine:      /^\s*Dual-licensed\b/i,
+  licensedUnderLine:     /^\s*Licensed under\b/i,
 };
 
 const COMMENT_GRAMMARS = {
@@ -268,10 +271,55 @@ function isCompliantComment(text, tags) {
   return false;
 }
 
+function commentEndLine(c) {
+  if (c.kind === 'line') return c.endLine || c.line;
+  return c.line + c.text.split('\n').length - 1;
+}
+
+function nextNonCommentLine(allLines, fromLineNumber, grammar) {
+  const max = Math.min(fromLineNumber + 5, allLines.length);
+  for (let i = fromLineNumber; i < max; i++) {
+    const raw = allLines[i] || '';
+    const trimmed = raw.trim();
+    if (trimmed === '') continue;
+    if (grammar.line && trimmed.startsWith(grammar.line)) continue;
+    if (grammar.block && (trimmed.startsWith(grammar.block[0]) || trimmed.startsWith('*'))) continue;
+    return raw;
+  }
+  return null;
+}
+
+function isGoDocStyle(comment, allLines, grammar) {
+  if (grammar !== COMMENT_GRAMMARS['.go']) return false;
+  const first = firstSignificantLine(comment.text);
+  const wordMatch = first.match(/^([A-Za-z_]\w*)/);
+  if (!wordMatch) return false;
+  const word = wordMatch[1];
+  const nextLine = nextNonCommentLine(allLines, commentEndLine(comment), grammar);
+  if (!nextLine) return false;
+  if (word === 'Package') {
+    const pkgMatch = first.match(/^Package\s+(\w+)/);
+    if (pkgMatch && new RegExp(`^\\s*package\\s+${pkgMatch[1]}\\b`).test(nextLine)) return true;
+  }
+  if (/^\s*package\s+\w+/.test(nextLine)) return true;
+  const esc = word.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const decls = [
+    new RegExp(`^\\s*func\\s+${esc}\\b`),
+    new RegExp(`^\\s*func\\s+\\([^)]*\\)\\s+${esc}\\b`),
+    new RegExp(`^\\s*type\\s+${esc}\\b`),
+    new RegExp(`^\\s*var\\s+${esc}\\b`),
+    new RegExp(`^\\s*const\\s+${esc}\\b`),
+    new RegExp(`^\\s*${esc}\\s+[\\w*\\[\\](){}.,]+`),
+  ];
+  return decls.some((re) => re.test(nextLine));
+}
+
 function checkCommentHygiene(filePath, content, grammar, config) {
   const violations = [];
+  const allLines = content.split('\n');
   for (const c of extractComments(content, grammar)) {
     if (isCompliantComment(c.text, config.tags)) continue;
+    if (isGoDocStyle(c, allLines, grammar)) continue;
     violations.push({
       file: filePath,
       line: c.line,
@@ -287,7 +335,10 @@ function parseSourceRefs(filePath, content) {
   const lines = content.split('\n');
   for (let i = 0; i < lines.length; i++) {
     const match = lines[i].match(/^[\s/*#]*@source:\s*([^\s)]+)/);
-    if (match) refs.push({ file: filePath, line: i + 1, ref: match[1] });
+    if (match) {
+      const ref = match[1].replace(/[.,;]+$/, '');
+      refs.push({ file: filePath, line: i + 1, ref });
+    }
   }
   return refs;
 }

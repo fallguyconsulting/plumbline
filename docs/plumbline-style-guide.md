@@ -166,7 +166,8 @@ Prose comments restating what code does are noise to an agent and a drift hazard
 The rule, which is lint-enforceable:
 
 - **Every comment begins with a structured tag** from the vocabulary below (projects may extend it).
-- **Machine directives are exempt**: build tags, generate directives, lint suppressions, license headers.
+- **Machine directives are exempt**: build tags, generate directives, lint suppressions, license headers (Copyright/SPDX/Licensed-under/Dual-licensed lines).
+- **Language documentation conventions are exempt**: for Go, the lint recognizes GoDoc-style comments (a comment whose first word names the declaration on the next non-comment line — `func Foo`, `type Bar`, `var Baz`, `const Quux`, struct fields, or the program-name comment preceding `package main`).
 - **Anything else is residue** — delete it on sight, including in code you didn't write (it will be regenerated as precedent otherwise).
 
 If information feels like it needs a comment but fits no tag, it belongs in a better name, a type, or nowhere.
