@@ -1,0 +1,438 @@
+#!/usr/bin/env node
+
+// @agent-contract
+// - Plumbline lint binary. Walks a target path (file or directory) and reports violations:
+//     1. comment-hygiene — every comment opens with a structured tag or is a machine directive
+//     2. source-missing-file / source-missing-symbol — @source: references that don't resolve
+//     3. blessed-invariant-uncovered — @blessed-invariant: identifier with no matching test file
+// - Exit codes: 0 clean, 2 violations found, 1 internal error
+// - Reads .plumbline.json from the resolved repo root if present; baked defaults otherwise
+// - Project may extend the tag vocabulary via config.tags_extend (additive only)
+// - Project may extend the ignore set via config.ignore (additive only)
+// - Does NOT: format violations as JSON, fix violations, parse full ASTs (regex + string-state scan)
+
+const fs = require('fs');
+const path = require('path');
+
+const DEFAULT_TAGS = [
+  '@constraint:',
+  '@deliberate:',
+  '@agent-contract',
+  '@blessed-invariant:',
+  '@source:',
+  '@diverged:',
+  '@reason:',
+];
+
+const MACHINE_DIRECTIVE_PATTERNS = {
+  goDirective:           /^\s*go:/,
+  golangciSuppression:   /^\s*nolint/,
+  generatedFileHeader:   /^\s*Code generated/i,
+  spdxLicenseLine:       /^\s*SPDX-/,
+  pythonTypeIgnore:      /^\s*type:\s*ignore/,
+  pythonNoqa:            /^\s*noqa/,
+  pylintSuppression:     /^\s*pylint:/,
+  cPragma:               /^\s*pragma\s/,
+  eslintSuppression:     /^\s*eslint-(?:disable|enable)/,
+  eslintGlobals:         /^\s*global\s/,
+  tsSuppression:         /^\s*ts-(?:ignore|expect-error|nocheck)/,
+  tslintSuppression:     /^\s*tslint:/,
+  biomeSuppression:      /^\s*biome-/,
+  prettierSuppression:   /^\s*prettier-/,
+  denoSuppression:       /^\s*deno-/,
+  copyrightBanner:       /^!/,
+  shebang:               /^!\s*\//,
+};
+
+const COMMENT_GRAMMARS = {
+  '.go':   { line: '//', block: ['/*', '*/'], strings: ['"', "'", '`'] },
+  '.ts':   { line: '//', block: ['/*', '*/'], strings: ['"', "'", '`'] },
+  '.tsx':  { line: '//', block: ['/*', '*/'], strings: ['"', "'", '`'] },
+  '.js':   { line: '//', block: ['/*', '*/'], strings: ['"', "'", '`'] },
+  '.jsx':  { line: '//', block: ['/*', '*/'], strings: ['"', "'", '`'] },
+  '.mjs':  { line: '//', block: ['/*', '*/'], strings: ['"', "'", '`'] },
+  '.cjs':  { line: '//', block: ['/*', '*/'], strings: ['"', "'", '`'] },
+  '.py':   { line: '#',  block: null,         strings: ['"', "'"] },
+  '.rs':   { line: '//', block: ['/*', '*/'], strings: ['"'] },
+  '.c':    { line: '//', block: ['/*', '*/'], strings: ['"'] },
+  '.h':    { line: '//', block: ['/*', '*/'], strings: ['"'] },
+  '.cc':   { line: '//', block: ['/*', '*/'], strings: ['"'] },
+  '.cpp':  { line: '//', block: ['/*', '*/'], strings: ['"'] },
+  '.hpp':  { line: '//', block: ['/*', '*/'], strings: ['"'] },
+  '.java': { line: '//', block: ['/*', '*/'], strings: ['"'] },
+  '.kt':   { line: '//', block: ['/*', '*/'], strings: ['"'] },
+  '.sh':   { line: '#',  block: null,         strings: ['"', "'"] },
+  '.bash': { line: '#',  block: null,         strings: ['"', "'"] },
+  '.rb':   { line: '#',  block: null,         strings: ['"', "'"] },
+};
+
+const DEFAULT_IGNORE_PATTERNS = [
+  'node_modules/',
+  'vendor/',
+  'dist/',
+  'build/',
+  'out/',
+  '.git/',
+  '.next/',
+  'target/',
+  '__pycache__/',
+  'coverage/',
+];
+
+function loadConfig(repoRoot) {
+  const configPath = path.join(repoRoot, '.plumbline.json');
+  let userConfig = {};
+  if (fs.existsSync(configPath)) {
+    try {
+      userConfig = JSON.parse(fs.readFileSync(configPath, 'utf8'));
+    } catch (err) {
+      console.error(`error: failed to parse .plumbline.json: ${err.message}`);
+      process.exit(1);
+    }
+  }
+  const tags = [...DEFAULT_TAGS];
+  if (Array.isArray(userConfig.tags_extend)) {
+    for (const t of userConfig.tags_extend) {
+      if (typeof t === 'string' && !tags.includes(t)) tags.push(t);
+    }
+  }
+  const ignore = [...DEFAULT_IGNORE_PATTERNS];
+  if (Array.isArray(userConfig.ignore)) {
+    for (const p of userConfig.ignore) {
+      if (typeof p === 'string' && !ignore.includes(p)) ignore.push(p);
+    }
+  }
+  const checks = {
+    comment_hygiene: true,
+    source_validity: true,
+    blessed_invariant_test_coverage: true,
+    ...(userConfig.checks || {}),
+  };
+  return { tags, ignore, checks };
+}
+
+function findRepoRoot(start) {
+  let current = path.resolve(start);
+  if (fs.statSync(current).isFile()) current = path.dirname(current);
+  const startDir = current;
+  while (true) {
+    if (fs.existsSync(path.join(current, '.git'))) return current;
+    if (fs.existsSync(path.join(current, '.plumbline.json'))) return current;
+    const parent = path.dirname(current);
+    if (parent === current) return startDir;
+    current = parent;
+  }
+}
+
+function shouldIgnore(filePath, repoRoot, ignorePatterns) {
+  const rel = path.relative(repoRoot, filePath);
+  for (const pattern of ignorePatterns) {
+    const normalized = pattern.replace(/\/$/, '');
+    if (rel === normalized) return true;
+    if (rel.startsWith(normalized + '/')) return true;
+    if (rel.includes('/' + normalized + '/')) return true;
+  }
+  return false;
+}
+
+function* walkFiles(target, repoRoot, ignorePatterns) {
+  const stat = fs.statSync(target);
+  if (stat.isFile()) {
+    if (COMMENT_GRAMMARS[path.extname(target)]) yield target;
+    return;
+  }
+  const entries = fs.readdirSync(target, { withFileTypes: true });
+  for (const entry of entries) {
+    const full = path.join(target, entry.name);
+    if (shouldIgnore(full, repoRoot, ignorePatterns)) continue;
+    if (entry.isDirectory()) {
+      yield* walkFiles(full, repoRoot, ignorePatterns);
+    } else if (entry.isFile() && COMMENT_GRAMMARS[path.extname(entry.name)]) {
+      yield full;
+    }
+  }
+}
+
+function extractRawComments(content, grammar) {
+  const comments = [];
+  let pos = 0;
+  let line = 1;
+  let inString = null;
+  let blockStartLine = 0;
+  let blockBuffer = null;
+
+  function advance() {
+    if (content[pos] === '\n') line++;
+    pos++;
+  }
+
+  while (pos < content.length) {
+    const c = content[pos];
+
+    if (blockBuffer !== null) {
+      const closeIdx = content.indexOf(grammar.block[1], pos);
+      if (closeIdx < 0) {
+        blockBuffer += content.slice(pos);
+        pos = content.length;
+        break;
+      }
+      blockBuffer += content.slice(pos, closeIdx);
+      comments.push({ text: blockBuffer, line: blockStartLine, kind: 'block' });
+      blockBuffer = null;
+      while (pos < closeIdx + grammar.block[1].length) advance();
+      continue;
+    }
+
+    if (inString) {
+      if (c === '\\' && pos + 1 < content.length) { advance(); advance(); continue; }
+      if (c === inString) inString = null;
+      advance();
+      continue;
+    }
+
+    if (grammar.strings.includes(c)) {
+      inString = c;
+      advance();
+      continue;
+    }
+
+    if (grammar.line && content.startsWith(grammar.line, pos)) {
+      const eol = content.indexOf('\n', pos);
+      const end = eol < 0 ? content.length : eol;
+      const text = content.slice(pos + grammar.line.length, end);
+      comments.push({ text, line, kind: 'line' });
+      while (pos < end) advance();
+      continue;
+    }
+
+    if (grammar.block && content.startsWith(grammar.block[0], pos)) {
+      blockStartLine = line;
+      blockBuffer = '';
+      for (let i = 0; i < grammar.block[0].length; i++) advance();
+      continue;
+    }
+
+    advance();
+  }
+
+  return comments;
+}
+
+function mergeConsecutiveLineComments(rawComments) {
+  const merged = [];
+  for (const c of rawComments) {
+    if (c.kind !== 'line') { merged.push(c); continue; }
+    const last = merged[merged.length - 1];
+    if (last && last.kind === 'line' && last.endLine === c.line - 1) {
+      last.text += '\n' + c.text;
+      last.endLine = c.line;
+    } else {
+      merged.push({ ...c, endLine: c.line });
+    }
+  }
+  return merged;
+}
+
+function extractComments(content, grammar) {
+  return mergeConsecutiveLineComments(extractRawComments(content, grammar));
+}
+
+function stripBlockCommentPrefix(line) {
+  return line.replace(/^\s*\*\s?/, '').trim();
+}
+
+function firstSignificantLine(commentText) {
+  const lines = commentText.split('\n')
+    .map(stripBlockCommentPrefix)
+    .filter((l) => l.length > 0);
+  return lines[0] || '';
+}
+
+function isMachineDirective(firstLine) {
+  for (const re of Object.values(MACHINE_DIRECTIVE_PATTERNS)) {
+    if (re.test(firstLine)) return true;
+  }
+  return false;
+}
+
+function isCompliantComment(text, tags) {
+  const first = firstSignificantLine(text);
+  if (!first) return true;
+  if (isMachineDirective(first)) return true;
+  for (const tag of tags) {
+    if (first.startsWith(tag)) return true;
+  }
+  return false;
+}
+
+function checkCommentHygiene(filePath, content, grammar, config) {
+  const violations = [];
+  for (const c of extractComments(content, grammar)) {
+    if (isCompliantComment(c.text, config.tags)) continue;
+    violations.push({
+      file: filePath,
+      line: c.line,
+      code: 'comment-hygiene',
+      message: 'comment opens with prose; expected structured tag or machine directive',
+    });
+  }
+  return violations;
+}
+
+function parseSourceRefs(filePath, content) {
+  const refs = [];
+  const lines = content.split('\n');
+  for (let i = 0; i < lines.length; i++) {
+    const match = lines[i].match(/^[\s/*#]*@source:\s*([^\s)]+)/);
+    if (match) refs.push({ file: filePath, line: i + 1, ref: match[1] });
+  }
+  return refs;
+}
+
+function escapeForRegex(s) {
+  return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+function checkSourceValidity(repoRoot, files) {
+  const violations = [];
+  for (const file of files) {
+    const content = fs.readFileSync(file, 'utf8');
+    for (const ref of parseSourceRefs(file, content)) {
+      const colonIdx = ref.ref.lastIndexOf(':');
+      let filePart, symbolPart;
+      if (colonIdx > 0 && ref.ref.indexOf('/') < colonIdx) {
+        filePart = ref.ref.slice(0, colonIdx);
+        symbolPart = ref.ref.slice(colonIdx + 1);
+      } else {
+        filePart = ref.ref;
+        symbolPart = null;
+      }
+      const targetPath = path.resolve(repoRoot, filePart);
+      if (!fs.existsSync(targetPath)) {
+        violations.push({
+          file: ref.file,
+          line: ref.line,
+          code: 'source-missing-file',
+          message: `@source: references nonexistent file ${filePart}`,
+        });
+        continue;
+      }
+      if (symbolPart) {
+        const target = fs.readFileSync(targetPath, 'utf8');
+        const re = new RegExp(`\\b${escapeForRegex(symbolPart)}\\b`);
+        if (!re.test(target)) {
+          violations.push({
+            file: ref.file,
+            line: ref.line,
+            code: 'source-missing-symbol',
+            message: `@source: symbol "${symbolPart}" not found in ${filePart}`,
+          });
+        }
+      }
+    }
+  }
+  return violations;
+}
+
+function parseInvariantAnnotations(filePath, content) {
+  const anns = [];
+  const lines = content.split('\n');
+  for (let i = 0; i < lines.length; i++) {
+    const match = lines[i].match(/^[\s/*#]*@blessed-invariant:\s*([A-Za-z0-9_-]+)/);
+    if (match) anns.push({ file: filePath, line: i + 1, id: match[1] });
+  }
+  return anns;
+}
+
+function isTestFile(filePath) {
+  const base = path.basename(filePath);
+  if (/_test\.(go|rs|java|kt|c|cpp|cc|h|hpp)$/i.test(base)) return true;
+  if (/\.test\.(ts|tsx|js|jsx|mjs|cjs)$/i.test(base)) return true;
+  if (/\.spec\.(ts|tsx|js|jsx|mjs|cjs|rb)$/i.test(base)) return true;
+  if (/^test_.+\.py$/i.test(base)) return true;
+  if (/.+_test\.py$/i.test(base)) return true;
+  return false;
+}
+
+function checkBlessedInvariantCoverage(repoRoot, files) {
+  const violations = [];
+  const allAnnotations = [];
+  const testContents = [];
+
+  for (const file of files) {
+    const content = fs.readFileSync(file, 'utf8');
+    allAnnotations.push(...parseInvariantAnnotations(file, content));
+    if (isTestFile(file)) testContents.push(content);
+  }
+
+  const uniqueIds = new Set(allAnnotations.map((a) => a.id));
+  const coveredIds = new Set();
+  for (const id of uniqueIds) {
+    for (const tc of testContents) {
+      if (tc.includes(id)) { coveredIds.add(id); break; }
+    }
+  }
+
+  const reportedIds = new Set();
+  for (const ann of allAnnotations) {
+    if (reportedIds.has(ann.id) || coveredIds.has(ann.id)) continue;
+    reportedIds.add(ann.id);
+    violations.push({
+      file: ann.file,
+      line: ann.line,
+      code: 'blessed-invariant-uncovered',
+      message: `@blessed-invariant: ${ann.id} has no test file mentioning this identifier`,
+    });
+  }
+  return violations;
+}
+
+function formatViolation(v) {
+  return `${v.file}:${v.line}: plumbline/${v.code}: ${v.message}`;
+}
+
+function main() {
+  const args = process.argv.slice(2);
+  const target = args[0] || process.cwd();
+
+  if (!fs.existsSync(target)) {
+    console.error(`error: target not found: ${target}`);
+    process.exit(1);
+  }
+
+  const repoRoot = findRepoRoot(target);
+  const config = loadConfig(repoRoot);
+
+  const files = [];
+  for (const f of walkFiles(path.resolve(target), repoRoot, config.ignore)) {
+    files.push(f);
+  }
+
+  const violations = [];
+
+  if (config.checks.comment_hygiene) {
+    for (const file of files) {
+      const content = fs.readFileSync(file, 'utf8');
+      const grammar = COMMENT_GRAMMARS[path.extname(file)];
+      violations.push(...checkCommentHygiene(file, content, grammar, config));
+    }
+  }
+
+  if (config.checks.source_validity) {
+    violations.push(...checkSourceValidity(repoRoot, files));
+  }
+
+  if (config.checks.blessed_invariant_test_coverage) {
+    violations.push(...checkBlessedInvariantCoverage(repoRoot, files));
+  }
+
+  violations.sort((a, b) => a.file.localeCompare(b.file) || a.line - b.line);
+  for (const v of violations) console.log(formatViolation(v));
+
+  if (violations.length > 0) {
+    console.error(`plumbline: ${violations.length} violation(s)`);
+    process.exit(2);
+  }
+}
+
+main();

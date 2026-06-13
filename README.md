@@ -26,8 +26,34 @@ Plumbline grew out of the Cold Read methodology. Cold Read v1 optimized for AI a
 
 ## Status
 
-- **v0.1 (current)** — Manifesto, style guide, cheatsheet, and the `/plumbline:affirm` skill that materializes the cheatsheet into a consuming project.
-- **v0.2 (planned)** — The `plumbline` lint binary (comment-hygiene check, `@source:` validity, the blessed-invariant registry join), a `PostToolUse` hook that runs the lint on every edit, and `/plumbline:audit` for sweeping an existing codebase into compliance.
+- **v0.2 (current)** — The `plumbline` lint binary (comment hygiene, `@source:` validity, `@blessed-invariant:` test coverage), the `PostToolUse` hook that auto-runs the lint on every Edit/Write, and `/plumbline:audit` for sweeping an existing codebase into compliance. Plus v0.1 carryover: manifesto, style guide, cheatsheet, `/plumbline:affirm`.
+- **v0.1** — Manifesto, style guide, cheatsheet, `/plumbline:affirm`.
+
+## Lint, config, and CI
+
+The lint binary lives at `bin/plumbline` (Node.js, no build step). Invoke it directly:
+
+```
+node /path/to/plumbline-plugin/bin/plumbline [path]
+```
+
+Or from a hooked Claude Code session, it runs automatically after every Edit/Write.
+
+Project config lives in `.plumbline.json` at the repo root (optional):
+
+```json
+{
+  "tags_extend": ["@concept:", "@story:", "@decision:"],
+  "ignore": ["generated/", "test/fixtures/"],
+  "checks": {
+    "comment_hygiene": true,
+    "source_validity": true,
+    "blessed_invariant_test_coverage": true
+  }
+}
+```
+
+For CI, run `node bin/plumbline .` from the project root and treat any non-zero exit as a failure.
 
 ## License
 

@@ -54,3 +54,13 @@ Actionable conventions for this codebase under the Plumbline methodology. The fu
 - Shared-code change: edit the one definition, let compiler + contract suites enumerate blast radius, fix all consumers in the same change
 - Idiom change: sweep all instances in the same change, add lint so the old idiom cannot return
 - Update `feature-index.md` when features/dependencies change
+
+## Tooling
+
+The Plumbline plugin ships:
+
+- `plumbline <path>` — the lint binary; checks comment hygiene, `@source:` validity, and `@blessed-invariant:` test coverage. Exit 0 clean, 2 violations, 1 internal error.
+- `/plumbline:affirm` — install or refresh `.claude/rules/plumbline-cheatsheet.md` from the plugin's canonical version.
+- `/plumbline:audit` — run the lint over the whole project and group findings into a remediation plan.
+- A `PostToolUse` hook auto-runs the lint on every Edit/Write; violations block (exit 2) so the agent sees them and fixes in the same turn.
+- Project config lives in `.plumbline.json` at the repo root (optional); `tags_extend` adds project-specific tags (e.g. `@concept:`), `ignore` adds paths to skip.
