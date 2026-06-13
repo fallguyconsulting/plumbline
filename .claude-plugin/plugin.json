@@ -1,0 +1,9 @@
+{
+  "name": "plumbline",
+  "description": "Code that runs true under agentic maintenance",
+  "version": "0.1.0",
+  "author": {
+    "name": "Fall Guy Consulting"
+  },
+  "license": "Apache-2.0"
+}
