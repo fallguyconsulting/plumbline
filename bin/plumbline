@@ -484,25 +484,651 @@ function formatViolation(v) {
   return `${v.file}:${v.line}: plumbline/${v.code}: ${v.message}`;
 }
 
-function main() {
-  const args = process.argv.slice(2);
-  const target = args[0] || process.cwd();
+function slugCmd(prose) {
+  if (!prose || !prose.trim()) {
+    console.error('usage: plumbline slug "<prose description>"');
+    process.exit(1);
+  }
+  console.log(generateSlug(prose));
+  process.exit(0);
+}
 
+const SLUG_STOP_WORDS = new Set([
+  'a', 'an', 'the', 'is', 'are', 'was', 'were', 'be', 'been', 'being',
+  'has', 'have', 'had', 'do', 'does', 'did', 'will', 'would', 'should',
+  'may', 'might', 'must', 'shall', 'can', 'could', 'of', 'in', 'on',
+  'at', 'to', 'for', 'with', 'by', 'from', 'and', 'or', 'but', 'not',
+  'no', 'as', 'that', 'this', 'these', 'those', 'it', 'its', 'they',
+  'them', 'their', 'when', 'where', 'how', 'why', 'what', 'which',
+  'who', 'whom', 'so', 'if', 'while', 'until', 'than', 'then', 'into',
+  'about', 'over', 'under', 'between', 'among', 'before', 'after',
+]);
+
+function generateSlug(prose) {
+  const cleaned = prose
+    .toLowerCase()
+    .replace(/[^\w\s-]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+  const words = cleaned.split(' ').filter((w) => w.length > 0 && !SLUG_STOP_WORDS.has(w));
+  const significant = words.slice(0, 5);
+  if (significant.length === 0) return 'unnamed';
+  return significant.join('-').replace(/-+/g, '-');
+}
+
+const EXPLAIN_TOPICS = {
+  'comment-hygiene': `comment-hygiene — every comment opens with a structured tag or a machine directive
+(language docstring conventions like GoDoc and JSDoc are exempt). Prose
+narration is residue: delete it on sight unless it carries a tag.
+
+Tag vocabulary (project may extend):
+  @constraint:        external requirement the code cannot express
+  @deliberate:        guard on intentionally surprising code
+  @agent-contract     contract of shared code (guarantees + negative space)
+  @blessed-invariant: named cross-cutting invariant at its enforcement site
+  @source:            tracked mirror (narrow use: divergence-expected only)
+  @diverged:          marks a mirror that has intentionally diverged
+  @reason:            divergence rationale
+
+Compliant examples:
+  // @constraint: postgres requires acquiring instance locks before frame locks.
+  // @deliberate: sequential on purpose — parallel writes break invariant 4.
+  // Foo does the thing. — (Go GoDoc — exempt because the next decl is 'func Foo')`,
+
+  'source-missing-file': `source-missing-file — an @source: annotation references a file path
+that does not resolve from the repository root.
+
+Path format: '@source: <repo-relative-path>[::Symbol]' (legacy single-colon
+form 'path:symbol' also accepted). The path is always resolved from the
+repository root (the directory containing the .git or .plumbline.json
+marker), not from the file containing the annotation.
+
+Common causes:
+  - Path written relative to a module/package root instead of repo root
+  - File renamed or moved without updating the @source: ref
+  - Annotation pointing at a file that has been consolidated away
+
+Fix: update the @source: ref to the current repo-relative path, or mark
+the mirror as diverged with @diverged: true + @reason: (or consolidate
+into a shared definition per strict DRY).`,
+
+  'source-missing-symbol': `source-missing-symbol — an @source: annotation's symbol component
+does not appear in the referenced file.
+
+The lint does a word-boundary grep for the symbol in the target file; it
+is not AST-aware, so a comment mention of the symbol counts as a match.
+A failure here typically means the symbol was renamed or moved out of
+the file the mirror still points at.
+
+Fix: update the symbol to its new name, point @source: at the new
+file::Symbol, or remove the annotation if the mirror has been
+consolidated.`,
+
+  'blessed-invariant-uncovered': `blessed-invariant-uncovered — a @blessed-invariant: <slug>
+annotation in source code has no matching mention in any test file.
+
+The lint searches for the slug string in every test file (files matching
+*_test.*, *.test.*, *.spec.*, test_*.py). Any occurrence — a comment
+referencing the slug, the slug in a string literal, anything — counts.
+
+Fix: in a test that exercises the invariant, add a top-of-file or
+top-of-test comment that names the slug, e.g.:
+  // @blessed-invariant: <slug> — exercised here: <one-line statement>
+
+The reverse fix (rename the slug or remove the annotation if the
+invariant has been retired) is also valid.`,
+
+  '@constraint:': `@constraint: — marks an externally imposed requirement that the code itself cannot express.
+
+Use when a non-obvious behavior is forced by something outside the function: an
+operating-system contract, an external API's response shape, a wire-protocol fact,
+a database engine's locking discipline. Without the tag, a future agent might
+"simplify" the code in a way that violates the external rule.
+
+Examples:
+  // @constraint: PID-1 silently drops SIGTERM that arrives before the
+  // signal handler is installed; the buffered chan queues mid-startup signals.
+  // @constraint: Postgres advisory-lock acquisition order must be deterministic
+  // across the (named, scope) lock kinds to avoid the diamond deadlock.`,
+
+  '@deliberate:': `@deliberate: — guards intentionally surprising code against cleanup.
+
+Use when the obvious alternative is wrong for a non-obvious reason, and you
+want the next reader (human or agent) to know the choice was made on purpose.
+This is the opposite of @constraint: — the rule isn't imposed from outside,
+it's a project-internal invariant that the code is structured to maintain.
+
+Examples:
+  // @deliberate: not batched — each row must commit independently per invariant 4.
+  // @deliberate: sequential on purpose; concurrent writes break the per-instance
+  // ordering invariant.`,
+
+  '@agent-contract': `@agent-contract — documents the contract of shared infrastructure code.
+
+Weight the block toward what the caller cannot learn by reading the
+implementation: guarantees, non-guarantees, caller responsibilities. Do
+NOT write usage tutorials — agents read implementations cheaply.
+
+Example:
+  // @agent-contract
+  // - Guarantees: transactions roll back on unhandled exception; safe for concurrent use.
+  // - Does NOT handle: retries (caller's responsibility), async contexts (use async_database).
+  // - Pool size: configured via DATABASE_POOL_SIZE env var.
+  class Database { ... }`,
+
+  '@blessed-invariant:': `@blessed-invariant: <slug> — names a cross-cutting invariant at its enforcement site.
+
+The slug is the durable identifier. A brief description after the slug (em-dash
+separator) is optional but encouraged. The annotation belongs at the line where
+the invariant is enforced, not on every site that happens to touch related code.
+
+The slug must appear in at least one test file (lint-enforced); the test that
+exercises the invariant adds a comment naming the slug so the join closes.
+
+Examples:
+  // @blessed-invariant: claimant-guarded-release — only the holder recorded on
+  // the claim row may release it; enforced here by the claimant_id guard.
+
+  // @blessed-invariant: callback-determinism — phase-check + state transition
+  // for the run-to-terminal flow must occur in the same tx.`,
+
+  '@source:': `@source: <path>[::Symbol] — marks code that is mirrored from a canonical site.
+
+Narrow use only: code that is coincidentally similar but semantically independent,
+where future divergence is expected. The canonical example is two database drivers
+implementing one contract with intentionally different SQL.
+
+If the two sites must always change together, they are one behavior — share them
+instead. @source: is not a license to copy logic that ought to be DRY.
+
+Annotation format:
+  // @source: lib/foundation/persistence/postgres/store.go::OpenLedger
+  // @diverged: true
+  // @reason: sqlite uses BEGIN IMMEDIATE; postgres uses serializable isolation.`,
+};
+
+function explainCmd(topic) {
+  if (!topic) {
+    console.log('usage: plumbline explain <topic>');
+    console.log('');
+    console.log('available topics:');
+    for (const t of Object.keys(EXPLAIN_TOPICS)) console.log(`  ${t}`);
+    process.exit(0);
+  }
+  const entry = EXPLAIN_TOPICS[topic];
+  if (!entry) {
+    console.error(`unknown topic: ${topic}`);
+    console.error(`run 'plumbline explain' to list available topics`);
+    process.exit(1);
+  }
+  console.log(entry);
+  process.exit(0);
+}
+
+function ciCmd(platform) {
+  if (!platform || !CI_TEMPLATES[platform]) {
+    console.log('usage: plumbline ci <platform>');
+    console.log('');
+    console.log('available platforms:');
+    for (const p of Object.keys(CI_TEMPLATES)) console.log(`  ${p}`);
+    process.exit(platform ? 1 : 0);
+  }
+  console.log(CI_TEMPLATES[platform]);
+  process.exit(0);
+}
+
+const CI_TEMPLATES = {
+  github: `name: plumbline
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+jobs:
+  plumbline:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - name: install plumbline
+        run: |
+          git clone --depth 1 https://github.com/fallguyconsulting/plumbline /tmp/plumbline
+      - name: lint
+        run: node /tmp/plumbline/bin/plumbline .
+      - name: budget check
+        if: hashFiles('.plumbline-budget.json') != ''
+        run: node /tmp/plumbline/bin/plumbline budget check
+`,
+  gitlab: `plumbline:
+  image: node:20
+  stage: test
+  before_script:
+    - git clone --depth 1 https://github.com/fallguyconsulting/plumbline /tmp/plumbline
+  script:
+    - node /tmp/plumbline/bin/plumbline .
+    - test -f .plumbline-budget.json && node /tmp/plumbline/bin/plumbline budget check || true
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+`,
+  'pre-commit': `repos:
+  - repo: local
+    hooks:
+      - id: plumbline
+        name: plumbline
+        entry: node /path/to/plumbline/bin/plumbline
+        language: system
+        pass_filenames: true
+        types: [go, javascript, ts, python, rust]
+`,
+};
+
+function budgetCmd(action, target) {
+  const allowed = ['save', 'check'];
+  if (!allowed.includes(action)) {
+    console.error('usage: plumbline budget save|check [path]');
+    process.exit(1);
+  }
   if (!fs.existsSync(target)) {
     console.error(`error: target not found: ${target}`);
     process.exit(1);
   }
+  const { violations, repoRoot } = runLint(target);
+  const count = violations.length;
+  const byCheck = {};
+  for (const v of violations) byCheck[v.code] = (byCheck[v.code] || 0) + 1;
+  const budgetPath = path.join(repoRoot, '.plumbline-budget.json');
 
+  if (action === 'save') {
+    const payload = { count, by_check: byCheck };
+    fs.writeFileSync(budgetPath, JSON.stringify(payload, null, 2) + '\n');
+    console.log(`saved baseline: ${count} violation(s) at ${path.relative(repoRoot, budgetPath) || '.plumbline-budget.json'}`);
+    for (const [code, n] of Object.entries(byCheck)) console.log(`  ${code}: ${n}`);
+    process.exit(0);
+  }
+
+  if (!fs.existsSync(budgetPath)) {
+    console.error(`error: no baseline at ${path.relative(repoRoot, budgetPath) || '.plumbline-budget.json'} — run 'plumbline budget save' first`);
+    process.exit(1);
+  }
+  const baseline = JSON.parse(fs.readFileSync(budgetPath, 'utf8'));
+  const baselineCount = baseline.count || 0;
+  if (count > baselineCount) {
+    console.error(`plumbline budget: ${count} violation(s) exceeds baseline ${baselineCount} (+${count - baselineCount})`);
+    for (const [code, n] of Object.entries(byCheck)) {
+      const base = (baseline.by_check && baseline.by_check[code]) || 0;
+      if (n > base) console.error(`  ${code}: ${n} (was ${base}, +${n - base})`);
+    }
+    process.exit(2);
+  }
+  if (count < baselineCount) {
+    console.log(`plumbline budget: ${count} violation(s) — ${baselineCount - count} below baseline (run 'plumbline budget save' to ratchet)`);
+  } else {
+    console.log(`plumbline budget: ${count} violation(s) — at baseline`);
+  }
+  process.exit(0);
+}
+
+function patternsCmd(target) {
+  if (!fs.existsSync(target)) {
+    console.error(`error: target not found: ${target}`);
+    process.exit(1);
+  }
+  const { violations } = runLint(target);
+  if (violations.length === 0) {
+    console.log('plumbline: no violations to cluster');
+    process.exit(0);
+  }
+  const buckets = {};
+  for (const v of violations) {
+    const key = patternKey(v);
+    if (!buckets[key]) buckets[key] = { code: v.code, signature: key, count: 0, samples: [] };
+    buckets[key].count++;
+    if (buckets[key].samples.length < 3) buckets[key].samples.push(`${v.file}:${v.line}`);
+  }
+  const sorted = Object.values(buckets).sort((a, b) => b.count - a.count);
+  console.log(`plumbline patterns: ${violations.length} violation(s) in ${sorted.length} cluster(s)`);
+  console.log('');
+  for (const b of sorted) {
+    console.log(`  [${b.count}x] ${b.code}: ${b.signature}`);
+    for (const s of b.samples) console.log(`    ${s}`);
+    if (b.count > b.samples.length) console.log(`    ... and ${b.count - b.samples.length} more`);
+    console.log('');
+  }
+  process.exit(sorted.length > 0 ? 2 : 0);
+}
+
+function patternKey(v) {
+  if (v.code === 'source-missing-file' || v.code === 'source-missing-symbol') {
+    const m = v.message.match(/file ([^\s]+)/) || v.message.match(/"([^"]+)" not found in ([^\s]+)/);
+    if (m) {
+      const ref = m[1];
+      const prefix = ref.split('/')[0];
+      return `prefix:${prefix}/`;
+    }
+    return 'unparsed-source';
+  }
+  if (v.code === 'blessed-invariant-uncovered') {
+    const m = v.message.match(/@blessed-invariant: ([\w-]+)/);
+    return m ? `slug:${m[1]}` : 'unparsed-invariant';
+  }
+  if (v.code === 'comment-hygiene') {
+    return 'untagged-comment';
+  }
+  return v.code;
+}
+
+const SUGGEST_HEURISTICS = [
+  { match: /\b(must|always|never|requires|forbidden|mandatory|MUST|MUST NOT)\b/i, tag: '@constraint:', why: 'imperative requirement' },
+  { match: /\b(per spec|per concept|per invariant|per @|per `@|Per spec|Per concept)\b/, tag: '@constraint:', why: 'cites an external rule' },
+  { match: /\b(deliberate|intentional|on purpose|NOT batched|sequential on purpose|do not |don't )/i, tag: '@deliberate:', why: 'guards intentional surprise' },
+  { match: /\b(deadlock|race|atomic|ordering|invariant)\b/i, tag: '@deliberate:', why: 'concurrency / invariant guard' },
+  { match: /\bTODO\b/i, tag: 'delete', why: 'TODO marker — promote to issue or remove' },
+  { match: /\b(handle|handles?) the (case|error|failure)/i, tag: 'delete', why: 'generation residue (narration)' },
+];
+
+function suggestCmd(target) {
+  if (!fs.existsSync(target)) {
+    console.error(`error: target not found: ${target}`);
+    process.exit(1);
+  }
+  const { violations } = runLint(target);
+  if (violations.length === 0) {
+    console.log('plumbline: no violations to suggest fixes for');
+    process.exit(0);
+  }
+  const fileCache = {};
+  let suggested = 0;
+  for (const v of violations) {
+    const suggestion = suggestForViolation(v, fileCache);
+    if (!suggestion) continue;
+    suggested++;
+    console.log(`${v.file}:${v.line}: ${v.code}`);
+    console.log(`  suggestion: ${suggestion.action}`);
+    console.log(`  rationale:  ${suggestion.why}`);
+    if (suggestion.example) console.log(`  example:    ${suggestion.example}`);
+    console.log('');
+  }
+  console.log(`plumbline suggest: ${suggested} of ${violations.length} violation(s) have an automated suggestion`);
+  process.exit(0);
+}
+
+function suggestForViolation(v, fileCache) {
+  if (v.code === 'comment-hygiene') {
+    if (!fileCache[v.file]) {
+      try {
+        fileCache[v.file] = fs.readFileSync(v.file, 'utf8').split('\n');
+      } catch (e) {
+        return null;
+      }
+    }
+    const lines = fileCache[v.file];
+    const commentText = lines.slice(v.line - 1, Math.min(v.line + 4, lines.length)).join(' ');
+    for (const h of SUGGEST_HEURISTICS) {
+      if (h.match.test(commentText)) {
+        if (h.tag === 'delete') {
+          return { action: `consider removing — ${h.why}`, why: h.why };
+        }
+        return {
+          action: `tag as ${h.tag}`,
+          why: h.why,
+          example: `// ${h.tag} ${commentText.replace(/^[\s/*]+/, '').slice(0, 80).trim()}`,
+        };
+      }
+    }
+    return { action: 'tag as @deliberate: if load-bearing, else delete', why: 'no keyword match; manual review' };
+  }
+  if (v.code === 'source-missing-file') {
+    const m = v.message.match(/file ([^\s]+)/);
+    if (!m) return null;
+    const ref = m[1];
+    const basename = path.basename(ref.split('::')[0]);
+    return {
+      action: `find ${basename} in tree and update the @source: prefix`,
+      why: 'path is repo-root-relative; the file probably moved or was misprefixed',
+      example: `grep -rln "^${basename}$" --include="*.go" .`,
+    };
+  }
+  if (v.code === 'source-missing-symbol') {
+    return {
+      action: 'verify the symbol still exists; rename or repoint @source:',
+      why: 'symbol grep failed in the target file',
+    };
+  }
+  if (v.code === 'blessed-invariant-uncovered') {
+    const m = v.message.match(/@blessed-invariant: ([\w-]+)/);
+    if (!m) return null;
+    return {
+      action: `add '// @blessed-invariant: ${m[1]} — exercised here' to a test file that exercises this invariant`,
+      why: 'lint joins by greppable slug; any test mention satisfies it',
+    };
+  }
+  return null;
+}
+
+function starterCmd(target) {
+  if (!fs.existsSync(target)) {
+    console.error(`error: target not found: ${target}`);
+    process.exit(1);
+  }
+  const repoRoot = path.resolve(target);
+  const projectIgnores = new Set();
+  const hasGo = fs.existsSync(path.join(repoRoot, 'go.mod'));
+  const hasNode = fs.existsSync(path.join(repoRoot, 'package.json'));
+  const hasOkPlanner = fs.existsSync(path.join(repoRoot, '.ok-planner'));
+
+  if (hasOkPlanner) projectIgnores.add('.ok-planner/');
+  for (const candidate of ['gen/', 'generated/', 'proto/gen/', 'pb/', 'mocks/', 'fixtures/']) {
+    if (existsSomewhere(repoRoot, candidate)) projectIgnores.add(candidate);
+  }
+  if (hasGo) {
+    for (const c of ['lib/protocols/proto/v1/gen/', 'internal/gen/']) {
+      if (existsSomewhere(repoRoot, c)) projectIgnores.add(c);
+    }
+  }
+  if (hasNode) {
+    for (const c of ['.next/', '.turbo/', 'storybook-static/']) {
+      if (existsSomewhere(repoRoot, c)) projectIgnores.add(c);
+    }
+  }
+
+  const tagsExtend = [];
+  if (hasOkPlanner) tagsExtend.push('@concept:', '@story:', '@decision:');
+
+  const cfg = {
+    tags_extend: tagsExtend,
+    ignore: Array.from(projectIgnores),
+    checks: {
+      comment_hygiene: false,
+      source_validity: true,
+      blessed_invariant_test_coverage: true,
+    },
+  };
+  console.log(JSON.stringify(cfg, null, 2));
+  console.log('');
+  console.error('# Suggested .plumbline.json above. Save as .plumbline.json at the repo root.');
+  console.error(`# Detected: ${hasGo ? 'Go module ' : ''}${hasNode ? 'Node package ' : ''}${hasOkPlanner ? 'ok-planner ' : ''}`.trim());
+  process.exit(0);
+}
+
+function existsSomewhere(root, suffix) {
+  const trim = suffix.replace(/\/$/, '');
+  try {
+    const result = require('child_process').execSync(
+      `find . -maxdepth 6 -type d -name ${JSON.stringify(path.basename(trim))} 2>/dev/null | head -1`,
+      { cwd: root, encoding: 'utf8' }
+    ).trim();
+    return result.length > 0;
+  } catch (e) {
+    return false;
+  }
+}
+
+function doctorCmd(target) {
+  if (!fs.existsSync(target)) {
+    console.error(`error: target not found: ${target}`);
+    process.exit(1);
+  }
+  const repoRoot = findRepoRoot(target);
+  const checks = [];
+  const cfgPath = path.join(repoRoot, '.plumbline.json');
+  if (!fs.existsSync(cfgPath)) {
+    checks.push(['warn', `no .plumbline.json at ${repoRoot} — using defaults (run 'plumbline starter' for a project-shaped starter)`]);
+  } else {
+    try {
+      const cfg = JSON.parse(fs.readFileSync(cfgPath, 'utf8'));
+      checks.push(['ok', `.plumbline.json parses (${Object.keys(cfg.checks || {}).filter((k) => cfg.checks[k]).length} of 3 checks enabled)`]);
+    } catch (e) {
+      checks.push(['fail', `.plumbline.json is malformed: ${e.message}`]);
+    }
+  }
+  const cheatsheet = path.join(repoRoot, '.claude', 'rules', 'plumbline-cheatsheet.md');
+  if (fs.existsSync(cheatsheet)) checks.push(['ok', `cheatsheet committed at ${path.relative(repoRoot, cheatsheet)}`]);
+  else checks.push(['warn', `no cheatsheet at ${path.relative(repoRoot, cheatsheet)} — run '/plumbline:affirm' to materialize it`]);
+  const budget = path.join(repoRoot, '.plumbline-budget.json');
+  if (fs.existsSync(budget)) checks.push(['ok', `budget baseline at ${path.relative(repoRoot, budget)}`]);
+  else checks.push(['info', `no .plumbline-budget.json — optional, used by 'plumbline budget check' in CI`]);
+  const settings = path.join(repoRoot, '.claude', 'settings.json');
+  if (fs.existsSync(settings)) {
+    try {
+      const s = JSON.parse(fs.readFileSync(settings, 'utf8'));
+      const enabled = (s.enabledPlugins && Object.keys(s.enabledPlugins).some((k) => k.startsWith('plumbline@'))) || false;
+      if (enabled) checks.push(['ok', 'plumbline plugin enabled in .claude/settings.json']);
+      else checks.push(['warn', `plumbline plugin not enabled in .claude/settings.json — install via '/plugin install plumbline@fallguy'`]);
+    } catch (e) {
+      checks.push(['warn', `.claude/settings.json present but unparseable`]);
+    }
+  } else {
+    checks.push(['info', `no .claude/settings.json — plugin enablement check skipped`]);
+  }
+
+  let fails = 0;
+  for (const [status, msg] of checks) {
+    const symbol = status === 'ok' ? '✓' : status === 'fail' ? '✗' : status === 'warn' ? '!' : '·';
+    console.log(`  ${symbol} ${msg}`);
+    if (status === 'fail') fails++;
+  }
+  console.log('');
+  console.log(`plumbline doctor: ${fails === 0 ? 'healthy' : `${fails} failure(s)`}`);
+  process.exit(fails > 0 ? 1 : 0);
+}
+
+function linkTestsCmd(target) {
+  if (!fs.existsSync(target)) {
+    console.error(`error: target not found: ${target}`);
+    process.exit(1);
+  }
   const repoRoot = findRepoRoot(target);
   const config = loadConfig(repoRoot);
+  const files = [];
+  for (const f of walkFiles(path.resolve(target), repoRoot, config.ignore)) files.push(f);
 
+  const annotations = [];
+  const testsByDir = {};
+  for (const file of files) {
+    const content = fs.readFileSync(file, 'utf8');
+    annotations.push(...parseInvariantAnnotations(file, content));
+    if (isTestFile(file)) {
+      const dir = path.dirname(file);
+      if (!testsByDir[dir]) testsByDir[dir] = [];
+      testsByDir[dir].push({ file, content });
+    }
+  }
+
+  const allTestContents = Object.values(testsByDir).flat().map((t) => t.content);
+  let proposed = 0;
+  for (const ann of annotations) {
+    const slug = ann.id;
+    if (allTestContents.some((c) => c.includes(slug))) continue;
+    const candidates = [];
+    let dir = path.dirname(ann.file);
+    while (dir.startsWith(repoRoot) || dir === repoRoot) {
+      if (testsByDir[dir]) candidates.push(...testsByDir[dir].map((t) => t.file));
+      const parent = path.dirname(dir);
+      if (parent === dir) break;
+      dir = parent;
+      if (candidates.length > 0) break;
+    }
+    console.log(`${path.relative(repoRoot, ann.file)}:${ann.line}: @blessed-invariant: ${slug}`);
+    if (candidates.length === 0) {
+      console.log(`  no co-located test files found`);
+    } else {
+      console.log(`  candidate test files (closest first):`);
+      for (const c of candidates.slice(0, 5)) console.log(`    ${path.relative(repoRoot, c)}`);
+    }
+    console.log(`  fix: add '// @blessed-invariant: ${slug} — exercised here' near the relevant test`);
+    console.log('');
+    proposed++;
+  }
+  console.log(`plumbline link-tests: ${proposed} uncovered slug(s)`);
+  process.exit(proposed > 0 ? 2 : 0);
+}
+
+function consolidateCmd(target) {
+  if (!fs.existsSync(target)) {
+    console.error(`error: target not found: ${target}`);
+    process.exit(1);
+  }
+  const repoRoot = findRepoRoot(target);
+  const config = loadConfig(repoRoot);
+  const files = [];
+  for (const f of walkFiles(path.resolve(target), repoRoot, config.ignore)) files.push(f);
+
+  const candidates = [];
+  for (const file of files) {
+    const content = fs.readFileSync(file, 'utf8');
+    const refs = parseSourceRefs(file, content);
+    const diverged = /^[\s/*#]*@diverged:\s*true/m.test(content);
+    if (diverged) continue;
+    for (const ref of refs) {
+      const colon = ref.ref.lastIndexOf('::') > 0 ? ref.ref.lastIndexOf('::') : ref.ref.lastIndexOf(':');
+      const filePart = colon > 0 ? ref.ref.slice(0, colon) : ref.ref;
+      const target = path.resolve(repoRoot, filePart);
+      if (!fs.existsSync(target) || target === file) continue;
+      let canonical;
+      try {
+        canonical = fs.readFileSync(target, 'utf8');
+      } catch (e) {
+        continue;
+      }
+      const sim = lineSimilarity(content, canonical);
+      if (sim >= 0.6) candidates.push({ mirror: file, canonical: target, similarity: sim });
+    }
+  }
+
+  candidates.sort((a, b) => b.similarity - a.similarity);
+  for (const c of candidates) {
+    console.log(`${(c.similarity * 100).toFixed(0)}%  ${path.relative(repoRoot, c.mirror)}`);
+    console.log(`       ↳ ${path.relative(repoRoot, c.canonical)}`);
+  }
+  console.log('');
+  console.log(`plumbline consolidate: ${candidates.length} mirror(s) at ≥60% line-overlap with canonical`);
+  console.log('high similarity suggests the divergence-expected justification may no longer hold');
+  console.log('— consider consolidating per strict DRY, or marking explicitly @diverged: true');
+  process.exit(0);
+}
+
+function lineSimilarity(a, b) {
+  const aLines = new Set(a.split('\n').map((l) => l.trim()).filter((l) => l.length > 5));
+  const bLines = new Set(b.split('\n').map((l) => l.trim()).filter((l) => l.length > 5));
+  if (aLines.size === 0 || bLines.size === 0) return 0;
+  let intersect = 0;
+  for (const l of aLines) if (bLines.has(l)) intersect++;
+  return intersect / Math.min(aLines.size, bLines.size);
+}
+
+function runLint(target) {
+  const repoRoot = findRepoRoot(target);
+  const config = loadConfig(repoRoot);
   const files = [];
   for (const f of walkFiles(path.resolve(target), repoRoot, config.ignore)) {
     files.push(f);
   }
-
   const violations = [];
-
   if (config.checks.comment_hygiene) {
     for (const file of files) {
       const content = fs.readFileSync(file, 'utf8');
@@ -510,22 +1136,50 @@ function main() {
       violations.push(...checkCommentHygiene(file, content, grammar, config));
     }
   }
-
   if (config.checks.source_validity) {
     violations.push(...checkSourceValidity(repoRoot, files));
   }
-
   if (config.checks.blessed_invariant_test_coverage) {
     violations.push(...checkBlessedInvariantCoverage(repoRoot, files));
   }
-
   violations.sort((a, b) => a.file.localeCompare(b.file) || a.line - b.line);
-  for (const v of violations) console.log(formatViolation(v));
+  return { violations, files, repoRoot, config };
+}
 
+function lintCmd(target) {
+  if (!fs.existsSync(target)) {
+    console.error(`error: target not found: ${target}`);
+    process.exit(1);
+  }
+  const { violations } = runLint(target);
+  for (const v of violations) console.log(formatViolation(v));
   if (violations.length > 0) {
     console.error(`plumbline: ${violations.length} violation(s)`);
     process.exit(2);
   }
+  process.exit(0);
+}
+
+const SUBCOMMANDS = {
+  lint: (args) => lintCmd(args[0] || process.cwd()),
+  patterns: (args) => patternsCmd(args[0] || process.cwd()),
+  budget: (args) => budgetCmd(args[0], args[1] || process.cwd()),
+  suggest: (args) => suggestCmd(args[0] || process.cwd()),
+  slug: (args) => slugCmd(args.join(' ')),
+  starter: (args) => starterCmd(args[0] || process.cwd()),
+  doctor: (args) => doctorCmd(args[0] || process.cwd()),
+  explain: (args) => explainCmd(args[0]),
+  ci: (args) => ciCmd(args[0]),
+  'link-tests': (args) => linkTestsCmd(args[0] || process.cwd()),
+  consolidate: (args) => consolidateCmd(args[0] || process.cwd()),
+};
+
+function main() {
+  const args = process.argv.slice(2);
+  if (args.length === 0) return lintCmd(process.cwd());
+  const head = args[0];
+  if (SUBCOMMANDS[head]) return SUBCOMMANDS[head](args.slice(1));
+  return lintCmd(head);
 }
 
 main();

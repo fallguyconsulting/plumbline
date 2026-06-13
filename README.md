@@ -37,8 +37,30 @@ Plumbline grew out of the Cold Read methodology. Cold Read v1 optimized for AI a
 
 ## Status
 
-- **v0.2 (current)** — The `plumbline` lint binary (comment hygiene, `@source:` validity, `@blessed-invariant:` test coverage), the `PostToolUse` hook that auto-runs the lint on every Edit/Write, and `/plumbline:audit` for sweeping an existing codebase into compliance. Plus v0.1 carryover: manifesto, style guide, cheatsheet, `/plumbline:affirm`.
+- **v0.3 (current)** — A full compliance toolchain on top of the lint: `/plumbline:patterns` clusters violations by shape, `/plumbline:budget` ratchets too-noisy checks down over time, `/plumbline:suggest` proposes per-violation fixes, `/plumbline:slug` deterministically generates `@blessed-invariant:` slugs from prose, `/plumbline:starter` generates a project-shaped `.plumbline.json` from a repo scan, `/plumbline:doctor` diagnoses the installation, `/plumbline:explain` looks up the meaning and examples for each check or tag, `/plumbline:ci` emits a workflow for GitHub Actions / GitLab CI / pre-commit, `/plumbline:link-tests` proposes test-side `@blessed-invariant:` slug references, `/plumbline:consolidate` finds `@source:` mirrors that have grown too similar to their canonical to justify the copy. The lint also gained GoDoc + JSDoc convention exemptions for the comment-hygiene check.
+- **v0.2** — Lint binary (comment hygiene, `@source:` validity, `@blessed-invariant:` test coverage), `PostToolUse` hook on Edit/Write, `/plumbline:audit`.
 - **v0.1** — Manifesto, style guide, cheatsheet, `/plumbline:affirm`.
+
+## Subcommands
+
+The `plumbline` binary is a multi-tool CLI. The default (no subcommand) is the lint:
+
+```
+plumbline                              # lint cwd
+plumbline <path>                       # lint a path
+plumbline patterns [path]              # cluster violations by shape
+plumbline budget save|check [path]     # ratchet baseline
+plumbline suggest [path]               # propose per-violation fixes
+plumbline slug "<prose>"               # generate a kebab-case slug
+plumbline starter [path]               # generate a starter .plumbline.json
+plumbline doctor [path]                # diagnose installation
+plumbline explain [<topic>]            # show docs for a check or tag
+plumbline ci github|gitlab|pre-commit  # emit a CI workflow
+plumbline link-tests [path]            # propose test-side slug references
+plumbline consolidate [path]           # find @source: mirrors to collapse
+```
+
+Each subcommand is also wrapped as a Claude Code skill: `/plumbline:patterns`, `/plumbline:budget`, and so on.
 
 ## Lint, config, and CI
 
