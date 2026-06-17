@@ -2,19 +2,41 @@
 
 // SPDX-License-Identifier: Apache-2.0
 
-// @agent-contract
-// - PostToolUse hook for Edit and Write. Reads the tool-call event from stdin,
-//   extracts the edited file path, runs `plumbline` on just that file, and exits 2
-//   if violations are found. Stdout/stderr from plumbline is forwarded so the agent
-//   sees the violation messages and can fix in the same turn.
-// - Exit 0: no violations or file not lintable. Exit 2: violations found (blocks).
-//   Exit 1: internal error (treat as non-blocking).
-// - Reads CLAUDE_PLUGIN_ROOT from env to locate the lint binary.
-// - Does NOT: lint the whole repo on every edit; lint files outside the project tree.
-
 const fs = require('fs');
 const path = require('path');
 const { spawnSync } = require('child_process');
+
+function findRepoRoot(file) {
+  let dir = path.dirname(path.resolve(file));
+  while (dir !== path.dirname(dir)) {
+    if (fs.existsSync(path.join(dir, '.git'))) return dir;
+    dir = path.dirname(dir);
+  }
+  return null;
+}
+
+function getChangedLineRanges(file) {
+  const repoRoot = findRepoRoot(file);
+  if (!repoRoot) return null;
+  const tracked = spawnSync('git', ['-C', repoRoot, 'ls-files', '--error-unmatch', file], { stdio: 'ignore' });
+  if (tracked.status !== 0) return null;
+  const diff = spawnSync('git', ['-C', repoRoot, 'diff', '-U0', 'HEAD', '--', file], { encoding: 'utf8' });
+  if (diff.status !== 0) return null;
+  const ranges = [];
+  for (const line of diff.stdout.split('\n')) {
+    const m = line.match(/^@@ -\d+(?:,\d+)? \+(\d+)(?:,(\d+))? @@/);
+    if (!m) continue;
+    const start = parseInt(m[1], 10);
+    const count = m[2] !== undefined ? parseInt(m[2], 10) : 1;
+    if (count === 0) continue;
+    ranges.push([start, start + count - 1]);
+  }
+  return ranges;
+}
+
+function formatRanges(ranges) {
+  return ranges.map(([a, b]) => (a === b ? `${a}` : `${a}-${b}`)).join(',');
+}
 
 function main() {
   let event;
@@ -33,7 +55,15 @@ function main() {
   const binary = path.join(pluginRoot, 'bin', 'plumbline');
   if (!fs.existsSync(binary)) process.exit(0);
 
-  const result = spawnSync('node', [binary, file], { stdio: 'inherit' });
+  const args = [binary];
+  const ranges = getChangedLineRanges(file);
+  if (ranges !== null) {
+    if (ranges.length === 0) process.exit(0);
+    args.push('--lines', formatRanges(ranges));
+  }
+  args.push(file);
+
+  const result = spawnSync('node', args, { stdio: 'inherit' });
   if (result.error) process.exit(0);
   process.exit(result.status === 2 ? 2 : 0);
 }

@@ -1,11 +1,11 @@
 ---
 name: budget
-description: One-way violation ratchet for too-big-to-fix-now Plumbline checks. Records a baseline violation count in .plumbline-budget.json; CI fails any change that increases the count, accepts any that holds or decreases it.
+description: One-way violation ratchet for projects whose Plumbline backlog is too large to clear at once. Records a baseline violation count in .plumbline-budget.json; CI fails any change that increases the count, accepts any that holds or decreases it.
 ---
 
 # /plumbline:budget
 
-Manage the Plumbline violation budget — the ratchet mechanism for incrementally cleaning up checks too noisy to enable outright (typically `comment_hygiene` on a mature codebase).
+Manage the Plumbline violation budget — the ratchet mechanism for incrementally cleaning up a backlog too large to sweep at once.
 
 The budget file (`.plumbline-budget.json`) records the current violation count and per-check breakdown. CI invokes `plumbline budget check`; the lint exits 2 only if the count went UP, so PRs that hold or reduce the count pass.
 
@@ -40,4 +40,4 @@ esac
 
 - **Below baseline:** propose committing the new lower baseline with `/plumbline:budget save`. The ratchet is one-way; once committed, future increases fail CI.
 - **At baseline:** no action needed.
-- **Above baseline:** the lint has already exited 2; the change introduced new violations. Investigate which (the script breaks down by check code), propose fixes, or surface the design decision (sometimes new violations come from new code paths that genuinely need new tags).
+- **Above baseline:** the lint has already exited 2; the change introduced new violations. Investigate which (the script breaks down by check code), propose fixes, or surface the design decision.

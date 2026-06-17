@@ -66,16 +66,18 @@ def process(data):
         return Error("no data")
     if not data.valid:
         return Error("invalid data")
-    # actual logic here, at depth 1
+    # ... actual logic at depth 1
 ```
 
 ---
 
 ## Abstraction and DRY
 
-### One Place Per Behavior
+### One Place Per Behavior — Strict, No Exceptions
 
 Semantically identical logic lives in exactly one place. When you find yourself writing logic that exists elsewhere, share it — do not copy it. The threshold for extraction is **semantic identity**, not a call-site count: if two sites must always change together, they are one behavior and belong in one definition.
+
+Plumbline does not admit a "intentionally similar but separate" carve-out. If two pieces of code look alike enough to invite the question, they are duplicating one behavior — share them. The older methodology offered a tracked-mirror form (`@source:`) for "coincidentally similar, semantically independent" code; experience showed it was used to license duplication and has been removed.
 
 Do not extract trivia. A one-line comprehension inlined at two sites is not a shared behavior; wrapping it in a utility adds a hop for nothing.
 
@@ -105,25 +107,12 @@ Shared code earns its sharing by being verifiable without booting the world. Bef
 
 1. **A contract suite exists** — fast, unit-level tests at the abstraction boundary, runnable in isolation, pinning the behavior consumers rely on.
 2. **Consumers are enumerable** — the type system or a symbol search yields the complete consumer set.
-3. **An `@agent-contract` block states the negative space** — what the code does NOT handle (see Comments and Annotations).
 
-When multiple implementations satisfy one interface, the contract suite runs against **all** of them (a conformance suite). This is what keeps parallel implementations honest without copy-tracking discipline.
+When multiple implementations satisfy one interface, the contract suite runs against **all** of them (a conformance suite). This is what keeps parallel implementations honest.
 
 ### Check Speed Is a Placement Criterion
 
 When deciding where logic lives, ask: *what is the cheapest check that covers it there?* Logic placed where only a slow integration suite exercises it forces every future edit through that slow loop, and slow loops make agents batch changes, which makes failures harder to attribute. Prefer placements covered by fast, isolated suites; treat "only testable end-to-end" as a design smell.
-
-### The Narrow Survival of `@source:`
-
-Copying code is permitted in exactly one situation: two pieces of code are **coincidentally similar but semantically independent** — future divergence is *expected*, and a shared abstraction would couple things that must be free to differ. The canonical example: two database drivers implementing one interface with intentionally different SQL, kept honest by a shared conformance suite.
-
-In that situation:
-
-- Annotate the copy: `@source: path/to/file::symbol` (`::` is preferred; single `:` is accepted for back-compat)
-- When the copy diverges, mark it: `@diverged: true` + `@reason: <why>`
-- When modifying a canonical source, grep for its `@source:` references and visit each copy — apply, or mark diverged with a reason.
-
-If you cannot articulate why the two sites are expected to diverge, they are one behavior — share them instead.
 
 ---
 
@@ -134,68 +123,104 @@ Every written-down constraint needs a check that fails when an agent violates it
 | Constraint | Required check |
 | --- | --- |
 | Import / layering rules | Dependency lint (e.g. depguard). Lint config is authoritative; if prose and lint disagree, lint wins. |
-| Behavioral invariant | `@blessed-invariant` annotation at the enforcement site **plus** a test that exercises the invariant. An annotation without a test is an unfinished invariant. |
+| Behavioral invariant | An assertion with a message at the enforcement site, **plus** a test that fails when the invariant is violated. The test's name carries the rule. |
 | Wire / protocol contract | Conformance suite runnable against any implementation. |
 | Data shape at a boundary | Explicit type or schema — the compiler is the check. |
 | Style and idiom | Formatter + lint rules, not reviewer vigilance. |
-| Comment hygiene | Lint: every comment opens with a structured tag or a machine directive (see below). |
+| Comment hygiene | Plumbline's lint — comments are not permitted in source files except machine directives, configured citation tags, and JSDoc/GoDoc in opt-in files. |
 
-### Blessed Invariants
+### Invariants Go in Code, Not Comments
 
-A blessed invariant is a cross-cutting correctness or security property that must hold system-wide. Requirements:
+Cross-cutting correctness properties belong in:
 
-1. `@blessed-invariant` annotation at the code site that enforces it, naming the invariant
-2. A test that fails if the invariant is violated
-3. An `@agent-contract` block if the enforcing code is shared infrastructure
+- An assertion at the enforcement site (`assert holder_id == claim.claimant_id, "release_claim invariant: only the holder may release"`).
+- A test whose name carries the rule (`test_only_holder_may_release_claim`).
+- A type that makes the wrong shape unrepresentable, where possible.
 
 ```python
-# @blessed-invariant: claimant-guarded-release — only the holder recorded on the
-# claim row may release it; enforced here by the claimant_id guard in the UPDATE.
 def release_claim(db, claim_id, claimant_id):
+    claim = db.fetch_claim(claim_id)
+    assert claim.claimant_id == claimant_id, (
+        "release_claim invariant: only the holder recorded on the claim row may release it"
+    )
     ...
 ```
+
+```python
+def test_only_holder_may_release_claim():
+    # exercise the invariant
+    ...
+```
+
+The assertion message is the documentation; the test pins the rule. A future agent that "simplifies away" the assertion sees the test fail. A comment claiming the invariant holds is the failure mode this rule eliminates — comments do not enforce anything.
 
 ---
 
-## Comments and Annotations
+## Comments and Citations
 
-### Every Comment Is Tagged or Deleted
+### The Rule: No Comments
 
-Prose comments restating what code does are noise to an agent and a drift hazard: agents weight comments as intent signals, so a stale comment can pull an agent toward "fixing" correct code to match it. Most comment volume in agent-written code is **generation residue** — narration addressed to the change's reviewer ("handle the error case", "this ensures X") — and must be cleaned up after writing. No ad hoc agentic reasoning persists in the codebase.
+Code is the documentation. By default, comments are not permitted in source files. The lint catches every comment and reports it as a violation unless it falls into one of the three structural exemptions below. The default action for any comment-hygiene violation is **delete**.
 
-The rule, which is lint-enforceable:
+Most comment volume in agent-written code is **generation residue** — narration addressed to the change's reviewer rather than the code's next reader ("handle the error case", "this ensures X"). Some small share names a real load-bearing fact. That share belongs in code: an assertion, a test, a type, a name. None of it belongs in a comment.
 
-- **Every comment begins with a structured tag** from the vocabulary below (projects may extend it).
-- **Machine directives are exempt**: build tags, generate directives, lint suppressions, license headers (Copyright/SPDX/Licensed-under/Dual-licensed lines).
-- **Language documentation conventions are exempt**: for Go, the lint recognizes GoDoc-style comments (a comment whose first word names the declaration on the next non-comment line — `func Foo`, `type Bar`, `var Baz`, `const Quux`, struct fields, or the program-name comment preceding `package main`). For TypeScript/JavaScript, block comments (`/* */` / `/** */`) that open with a capitalized word and directly precede an exported or top-level declaration (`function`, `class`, `interface`, `type`, `const`/`let`/`var`, `enum`, `namespace`, methods, fields) are recognized as JSDoc-style documentation.
-- **Anything else is residue** — delete it on sight, including in code you didn't write (it will be regenerated as precedent otherwise).
+### Exemption 1 — Machine Directives
 
-If information feels like it needs a comment but fits no tag, it belongs in a better name, a type, or nowhere.
+Tooling syntax is not prose. The lint exempts comments whose first significant line matches:
 
-### Tag Vocabulary
+- License headers: `SPDX-License-Identifier:`, `Copyright`, `Licensed under`, `Dual-licensed`.
+- Lint suppressions: `eslint-disable` / `eslint-enable`, `ts-ignore` / `ts-expect-error` / `ts-nocheck`, `noqa`, `pylint:`, `nolint`, `tslint:`, `biome-`, `prettier-`, `deno-`.
+- Build tags: Go `go:` directives.
+- Generated-file markers: `Code generated`.
+- C-style pragmas: `pragma`.
+- Shebangs.
 
-| Tag | Carries | Example |
-| --- | --- | --- |
-| `@constraint:` | A requirement imposed from outside that the code cannot express — lock ordering, an external system's behavior, a wire-format fact | `# @constraint: postgres requires acquiring instance locks before frame locks; reversing deadlocks under load` |
-| `@deliberate:` | A guard on intentionally surprising code — why the obvious alternative is wrong, so a cleanup pass doesn't break it | `# @deliberate: not batched — each row must commit independently per invariant 4` |
-| `@agent-contract` | The contract of shared code, weighted toward negative space: guarantees, and what the caller must handle | see below |
-| `@blessed-invariant:` | A named cross-cutting invariant at its enforcement site | see Mechanical Checks |
-| `@source:` / `@diverged:` / `@reason:` | Tracked mirror of semantically independent code | see Abstraction and DRY |
+These can be added freely — they encode tooling state, not prose.
 
-Projects extend the vocabulary with their own structured tags (e.g. design-model citations like `@concept:`); the requirement is only that every tag is declared, greppable, and lintable.
+### Exemption 2 — Configured Citation Tags
 
-### `@agent-contract` Blocks
+Projects that need a code-to-design link declare citation tags in `.plumbline.json`. Each entry pairs a tag with a structural resolution rule. A comment whose first significant line starts with the tag is allowed iff the slug after the tag resolves per the rule.
 
-Write them on shared infrastructure. Weight them toward what an agent **cannot learn by reading the implementation** — guarantees, non-guarantees, and caller responsibilities. Do not write usage tutorials; agents read implementations cheaply.
+Two resolution modes:
 
-```python
-# @agent-contract
-# - Guarantees: transactions roll back on unhandled exception; safe for concurrent use
-# - Does NOT handle: retries (caller's responsibility), async contexts (use async_database)
-# - Pool size: cfg database.pool_size
-class Database:
-    ...
+- **`file_template`**: a path containing the literal `{slug}`. The slug from the comment is substituted in, and the resulting path must exist (relative to the repo root).
+- **`appears_in_glob`**: a comma-separated set of globs (`**`, `*` supported). The slug must appear (word-boundary match) in at least one file matching one of the globs.
+
+Example `.plumbline.json` for a project using ok-planner:
+
+```json
+{
+  "citations": [
+    { "tag": "@concept:",  "file_template": ".ok-planner/design/concepts/{slug}.md" },
+    { "tag": "@story:",    "file_template": ".ok-planner/design/stories/{slug}.md" },
+    { "tag": "@decision:", "file_template": ".ok-planner/design/decisions/{slug}.md" }
+  ]
+}
 ```
+
+A comment in source carrying `// @concept: claim-holder-guard` is allowed only when `.ok-planner/design/concepts/claim-holder-guard.md` exists. If the file does not exist, the lint reports `citation-unresolved`.
+
+This is the only way to add project-specific allowed comment forms. There is no way to declare a tag without a resolution rule — every citation must come with a check, which closes the seam the older tag vocabulary admitted.
+
+### Exemption 3 — Documentation Comments (Opt-In)
+
+Files that document a public API surface may opt in to JSDoc/GoDoc-style documentation comments by carrying this marker as a comment near the top:
+
+```
+// @plumbline:allow-docstrings
+```
+
+(or `# @plumbline:allow-docstrings` for hash-comment languages.)
+
+With the marker present, JSDoc-style block comments adjacent to a TS/JS declaration (function, class, interface, type, const/let/var, enum, namespace, methods, fields) and GoDoc-style line comments adjacent to a Go declaration (func, type, var, const, package) are exempt. Without the marker, they are not.
+
+The opt-in is intentional: most files in a codebase are not public-API surfaces and should not carry documentation comments. The marker is for the cases where they should.
+
+### Everything Else Is Residue
+
+Any comment that doesn't fit the three exemptions is residue. Delete on sight — including in code you didn't write (it will be regenerated as precedent otherwise).
+
+The methodology used to admit a tag vocabulary (`@constraint:`, `@deliberate:`, `@reason:`) for prose that named a real load-bearing fact. That vocabulary was structural in shape but seamful in practice — the agent decided "is this a constraint?" and the answer was always yes. It has been removed. The replacements are in code: `@constraint:` becomes an assertion with a message; `@deliberate:` becomes a test that fails when the obvious alternative is substituted, or a variable name that carries the intent; `@reason:` becomes the git history of the code that embodies the choice.
 
 ---
 
@@ -261,8 +286,8 @@ Inside a feature, be pragmatic; typing every internal variable is not required.
 
 - Test files live next to the code they test.
 - Each test file is runnable independently — no shared fixture files that must be understood to read the tests.
-- Name tests for the scenario, not the implementation: `test_create_order_fails_when_inventory_insufficient`.
-- Shared code's contract suite is fast and isolated (see Abstraction and DRY); integration suites confirm, unit contracts discover.
+- Name tests for the scenario, not the implementation: `test_create_order_fails_when_inventory_insufficient`. Test names that describe the rule are the load-bearing documentation for invariants and deliberate choices.
+- Shared code's contract suite is fast and isolated; integration suites confirm, unit contracts discover.
 
 ---
 
@@ -282,10 +307,6 @@ This is the normal, preferred mode of cross-cutting change. It produces mechanic
 2. Sweep every instance of the old idiom in the same change — no coexisting generations.
 3. Add or update a lint rule so the old idiom cannot return.
 
-### Changing a Tracked Mirror
-
-Only relevant to the narrow `@source:` case: grep for `@source:` references to the canonical site, visit each copy, apply or mark diverged with a reason.
-
 ---
 
 ## Enforcement
@@ -293,9 +314,8 @@ Only relevant to the narrow `@source:` case: grep for `@source:` references to t
 Configure lint/CI to check, at minimum:
 
 - **Dependency direction and purity** — the project's layering rules as lint (depguard or equivalent)
-- **Comment hygiene** — every comment opens with a structured tag or machine directive
-- **`@source:` validity** — referenced files and symbols exist
-- **`@blessed-invariant` coverage** — each annotation has a corresponding test (greppable pairing)
+- **Comment hygiene** — Plumbline's lint: no comments except machine directives, configured citations, and JSDoc/GoDoc in opt-in files
+- **Citation resolution** — every comment using a citation tag has a slug that resolves per the configured rule
 - **Formatter + style lint** — uniformity held mechanically
 - **File length** — warn above the guideline
 
@@ -312,18 +332,16 @@ Configure lint/CI to check, at minimum:
 ### DRY and Abstraction
 - [ ] No semantically identical logic in two places
 - [ ] New/changed shared code resolves statically (no dynamic indirection)
-- [ ] Shared code has an isolated contract suite and an `@agent-contract` block
-- [ ] Any `@source:` copy has an articulated divergence-expectation; diverged copies carry `@reason`
+- [ ] Shared code has an isolated contract suite
 
 ### Checks
-- [ ] Every new constraint has a mechanical check (lint / test / type / conformance)
-- [ ] New `@blessed-invariant` annotations have exercising tests
+- [ ] Every new constraint has a mechanical check (lint / test / type / assertion)
+- [ ] Cross-cutting invariants encoded as assertions with messages plus tests that pin the rule
 - [ ] Fast isolated checks cover the changed logic; the change was verified with them
 
-### Comments and Uniformity
-- [ ] Every comment opens with a structured tag; no narration residue
-- [ ] No second idiom introduced for a job that has one; idiom changes swept repo-wide
-- [ ] Tests co-located and independently runnable
+### Comments
+- [ ] No comments except license headers, machine directives, configured citation tags whose slugs resolve, and JSDoc/GoDoc in files carrying the opt-in marker
+- [ ] Any comment-hygiene violation cleared either by deleting or by converting the named constraint to an assertion / test / type / name
 
 ---
 
@@ -331,53 +349,15 @@ Configure lint/CI to check, at minimum:
 
 | Do | Don't |
 | --- | --- |
-| One place per behavior (strict DRY) | Copy logic between sites |
+| One place per behavior (strict DRY, no exceptions) | Copy logic between sites |
 | Named, searchable abstraction | Reflection, DI containers, convention magic |
 | Contract suite isolated at the boundary | Shared code testable only end-to-end |
-| Constraint → lint / test / type | Constraint as prose only |
+| Constraint → assertion / test / type / lint | Constraint as prose comment |
 | One idiom per job, swept on change | Coexisting style generations |
-| Tagged comments only | Narration, restating code, untagged prose |
-| `@agent-contract` = guarantees + negative space | Usage tutorials in comments |
+| No comments (delete on sight) | Narration, tagged prose, "deliberate" guards in comments |
+| Citation tags only with structural resolution | Tags as a license to write prose |
+| `@plumbline:allow-docstrings` on public-API files | Docstrings everywhere "for completeness" |
 | Types at boundaries | Types on every internal variable |
 | Explicit parameters and registration | Injected, ambient, or path-derived wiring |
 | Co-located tests | Parallel test tree |
 | Early returns | Deep nesting |
-| `@source:` only for expected divergence | `@source:` as a license to copy |
-
----
-
-## Annotation Reference
-
-### @constraint:
-An externally imposed requirement the code cannot express.
-```python
-# @constraint: external API returns 429 with no Retry-After; poll interval must stay >= 1s
-```
-
-### @deliberate:
-Guards intentionally surprising code against cleanup.
-```python
-# @deliberate: sequential on purpose — parallel writes violate the per-instance ordering invariant
-```
-
-### @agent-contract
-Contract of shared code: guarantees, non-guarantees, caller responsibilities.
-```python
-# @agent-contract
-# - Guarantees: ...
-# - Does NOT handle: ...
-```
-
-### @blessed-invariant:
-Named cross-cutting invariant at its enforcement site; must have an exercising test.
-```python
-# @blessed-invariant: <name> — <one-line statement>; enforced here by <mechanism>
-```
-
-### @source: / @diverged: / @reason:
-Tracked mirror of semantically independent code (narrow use only).
-```python
-# @source: path/to/file::symbol
-# @diverged: true
-# @reason: drivers intentionally differ in SQL dialect
-```

@@ -9,10 +9,10 @@ Print a starter `.plumbline.json` configured for the project's actual shape. Det
 
 - Go module (`go.mod`) — adds known generated-code dirs to ignore
 - Node package (`package.json`) — adds .next, .turbo, storybook-static to ignore
-- ok-planner sibling (`.ok-planner/`) — adds `@concept:`, `@story:`, `@decision:` to the tag vocabulary; adds `.ok-planner/` to ignore
+- ok-planner sibling (`.ok-planner/`) — adds `@concept:`, `@story:`, `@decision:` citation entries that resolve against `.ok-planner/design/{concepts,stories,decisions}/{slug}.md`; adds `.ok-planner/` to ignore
 - Generated-code dirs (`gen/`, `generated/`, `mocks/`, etc.) anywhere in the tree
 
-Default check selection: `source_validity` and `blessed_invariant_test_coverage` on; `comment_hygiene` off (typically too noisy on a mature codebase — see `/plumbline:budget` for the ratcheted-cleanup path).
+Default check selection: both `comment_hygiene` and `citation_resolution` enabled. Plumbline's rule is strict by default (no comments except machine directives, configured citations, or docstrings in opt-in files); there is no "soft start" with checks disabled.
 
 ## Run
 
@@ -24,8 +24,7 @@ node "${CLAUDE_PLUGIN_ROOT%/}/bin/plumbline" starter .
 
 Review the proposed config with the user. Common adjustments:
 
-- Add project-specific tags they use (e.g. `@story:`, `@status:`).
+- Add more citation entries if the project tracks design artifacts the heuristic didn't detect.
 - Add directories the heuristic missed (e.g. an internal `dist/` location).
-- Toggle `comment_hygiene` on if the codebase is small enough to enforce strictly from day one.
 
 Propose saving as `.plumbline.json` at the repo root once the user is happy.

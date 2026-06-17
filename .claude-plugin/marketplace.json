@@ -10,7 +10,7 @@
       "name": "plumbline",
       "source": "./",
       "displayName": "Plumbline",
-      "description": "Code that runs true under agentic maintenance. Ships the methodology rules (manifesto, style guide, cheatsheet), an idempotent affirm skill, a multi-language lint binary (comment hygiene, @source: validity, @blessed-invariant: test coverage), a PostToolUse hook, and an /plumbline:audit skill.",
+      "description": "Code that runs true under agentic maintenance. Ships the methodology rules (manifesto, style guide, cheatsheet), an idempotent affirm skill, a multi-language lint binary (comment hygiene with structural exemptions only, citation resolution), a PostToolUse hook, and a suite of compliance subcommands and skills.",
       "author": {
         "name": "Fall Guy Consulting"
       },

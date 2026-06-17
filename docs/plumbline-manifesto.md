@@ -67,23 +67,23 @@ The property that makes an abstraction agent-friendly is not its depth or its la
 
 Dynamic indirection is forbidden not because it is hard to read but because it is invisible to grep, to the type checker, and to static analysis — it defeats exactly the machinery that makes shared code safe to edit.
 
-**The narrow exception to "one place per behavior":** code that is **coincidentally similar but semantically independent**, where future divergence is *expected* and forcing a shared abstraction would be the lie. Two database drivers implementing one contract with intentionally different SQL is the canonical example — kept honest by a shared conformance suite, with `@source:` marking the mirrored shape (see the Style Guide).
+Plumbline is strict DRY without exception. There is no "this similar-looking code is intentionally separate" carve-out — if two sites must change together they share; if they don't, they aren't duplicating a behavior in the first place. The methodology used to admit a narrow `@source:` mirror form for "coincidentally similar but semantically independent" code; experience showed the carve-out was used to license what was actually duplication, and it has been removed.
 
 ### 3. Every Contract Has a Mechanical Check
 
-When you write down a constraint — an invariant, a layering rule, a wire contract, a guarantee in a contract block — ask: **what mechanically fails if an agent violates this?** If the answer is "nothing," that is the gap to close.
+When you write down a constraint — an invariant, a layering rule, a wire contract, a guarantee — ask: **what mechanically fails if an agent violates this?** If the answer is "nothing," that is the gap to close.
 
 The conversion table:
 
 | Constraint | Check |
 | --- | --- |
 | Import / layering rules | Dependency lint (e.g. depguard). If lint and prose disagree, lint wins. |
-| Behavioral invariant | A named invariant annotation **plus** a test that exercises it. An annotation without a test is an unfinished invariant. |
+| Behavioral invariant | An assertion with a message at the enforcement site, **plus** a test that fails when the invariant is violated. The test's name carries the rule. |
 | Wire / protocol contract | A conformance suite runnable against any implementation. |
 | Data shape at a boundary | An explicit type — the compiler conscripted as the check. |
 | Style and idiom decisions | Formatter and lint rules, not review-time vigilance. |
 
-**Check speed is an architectural property.** An agent's working loop is edit → check → edit; the friendliness of any piece of code is largely the cost of the cheapest check that catches a wrong edit to it. Shared code earns its sharing by carrying a contract checkable **in isolation** — fast unit-level tests at the abstraction boundary — so that editing it gets a verdict from the cheap suite and the expensive integration pass becomes confirmation, not discovery. When deciding where logic lives, "what is the cheapest check that covers it there?" is a legitimate placement criterion, on par with cohesion. Slow checks degrade agent work in a specific way: the agent batches more changes per verification round, which makes failures harder to attribute.
+**Check speed is an architectural property.** An agent's working loop is edit → check → edit; the friendliness of any piece of code is largely the cost of the cheapest check that catches a wrong edit to it. Shared code earns its sharing by carrying a contract checkable **in isolation** — fast unit-level tests at the abstraction boundary — so that editing it gets a verdict from the cheap suite and the expensive integration pass becomes confirmation, not discovery. When deciding where logic lives, "what is the cheapest check that covers it there?" is a legitimate placement criterion, on par with cohesion.
 
 ### 4. Explicit Over Implicit
 
@@ -112,7 +112,7 @@ The type at a boundary is not documentation — it is the compiler conscripted a
 
 Tests, types, constants, and helpers for a feature live with that feature, not in a parallel tree.
 
-### 8. Comments Are Tagged or Deleted
+### 8. Code Is the Documentation; Comments Are Residue
 
 Prose comments do not help agents read code — agents parse code directly, and well-named idiomatic code is its own explanation. Worse, comments are a drift hazard with a sharper edge for agents than for humans: a human reading a stale comment shrugs and trusts the code, but an agent weights comments as *intent signals* — a confidently wrong comment can pull an agent toward "fixing" correct code to match it.
 
@@ -120,13 +120,11 @@ Most comment volume in agent-written code is **generation residue**: narration a
 
 The rule:
 
-- **Every comment begins with a structured tag** from the project's tag vocabulary (`@agent-contract`, `@blessed-invariant:`, `@source:`/`@diverged:`, `@constraint:`, `@deliberate:`, plus project extensions). The tag states what kind of load-bearing information follows.
-- **Untagged prose comments are residue.** Clean them up after writing; delete them on sight when found. No ad hoc agentic reasoning persists in the codebase.
-- **Machine directives are exempt** (build tags, generate directives, lint suppressions, license headers) — they are tooling syntax, not prose.
+- **By default, comments are not permitted in source files.** Load-bearing information — a constraint, an invariant, a deliberate-choice guard — belongs in a code form an agent cannot route around: an assertion with a message, a test whose name carries the rule, a type that enforces the shape, a function or variable name that carries the intent.
+- **Three narrow exemptions.** Machine directives (license headers, lint suppressions, build tags, generated-file markers, shebangs) — these are tooling syntax, not prose. Project-configured citation tags from `.plumbline.json` — each pairs a tag with a structural resolution rule, so a comment using the tag is allowed only if its slug actually resolves to a file or appears in a configured set. Documentation comments — JSDoc/GoDoc adjacent to declarations, only in files carrying the opt-in marker `@plumbline:allow-docstrings`.
+- **Everything else is residue.** The default action is delete, including in code you didn't write — it will be regenerated as precedent otherwise.
 
-What earns a tag is information the code *cannot* express: a constraint imposed from outside (`@constraint:` — lock ordering, an external system's behavior, a wire-format fact), a guard on deliberately surprising code (`@deliberate:` — why the obvious alternative is wrong, so a cleanup pass doesn't helpfully break it), a shared-code contract (`@agent-contract`), an invariant (`@blessed-invariant:`). If a comment carries none of these, the information belongs in a name, a type, or nowhere.
-
-This rule is trivially lintable — flag any comment line that opens with prose — which is the point: principle 3, applied to comments themselves.
+The methodology used to admit a tag vocabulary — `@constraint:`, `@deliberate:`, `@reason:` — for prose that named a real load-bearing fact. Experience showed the tags were judgment-call exemptions in disguise: the agent decided "is this a constraint?" and the answer was always yes. The vocabulary was structural in shape but seamful in practice. Plumbline no longer offers it. Constraints belong in assertions; deliberate choices belong in test names; reasons belong in the git history of the code that embodies them.
 
 ---
 
@@ -140,9 +138,13 @@ Separation of concerns is, at root, a worry about what one mind can hold respons
 
 They can — but breaking a consumer of well-typed, conformance-tested shared code produces a *mechanical failure* (compile error, failing suite) that an agent fixes in the same change. The alternative — drift between copies — produces *silence*. Prefer the failure mode that announces itself.
 
-### "Isn't banning untagged comments extreme?"
+### "Isn't banning all comments extreme?"
 
-The tag requirement is a forcing function, not a prohibition on documentation. Everything a load-bearing comment used to do is still available — it just has to declare what kind of load it bears, which makes it greppable, auditable, and lintable. What the rule actually eliminates is narration, which was never documentation.
+The rule is not a prohibition on documentation. Documentation lives in code: in function names, type names, assertion messages, test names, and (when a file documents a public API) JSDoc/GoDoc with the opt-in marker. What the rule eliminates is *prose narration in source files*, which is the thing experience identified as the actual harm — both the residue cost (most of it was generation noise) and the drift cost (stale comments mislead agents). Information that doesn't fit one of the structural forms wasn't documentation; it was narration that had no enforcement.
+
+### "What about a constraint imposed from outside that the code can't express — Postgres lock ordering, a wire-format fact?"
+
+Encode it as an assertion at the boundary where the constraint enters the system, with a message that names the external rule, plus a test that fails if the order is reversed. The assertion is the enforcement; the message is the documentation; the test pins the rule against future "simplifications." A comment naming the constraint without the assertion is the failure mode this rule exists to eliminate.
 
 ### "Won't future agents make this obsolete too?"
 
@@ -156,10 +158,11 @@ Probably parts of it. This document should be revisited with each significant ca
 | --- | --- |
 | **Plumb** | Hanging true vertical; verifiably aligned. Code "runs plumb" when its mechanical checks confirm every load-bearing constraint still holds. |
 | **Statically resolvable** | Reachable from call site to behavior (and definition to consumers) via symbol search and declared types, with no runtime wiring. |
-| **Mechanical check** | A compiler error, lint rule, or test that fails automatically when a constraint is violated. |
+| **Mechanical check** | A compiler error, lint rule, assertion, or test that fails automatically when a constraint is violated. |
 | **Generation residue** | Narrative comments an agent writes while working, addressed to the change's reviewer rather than the code's next reader. |
 | **Drift** | Unintentional divergence — between code copies, or between a comment and the code it describes. |
-| **Blessed invariant** | A named cross-cutting invariant, annotated at its enforcement site and exercised by a test. |
+| **Citation tag** | A project-configured comment-prefix tag declared in `.plumbline.json`. Each tag pairs with a structural resolution rule; a comment using the tag is allowed only when the slug after it resolves. |
+| **Docstring opt-in marker** | The literal comment `@plumbline:allow-docstrings` in a file enables JSDoc/GoDoc documentation comments adjacent to declarations in that file. Without it, those comments are not allowed. |
 
 ---
 

@@ -9,7 +9,7 @@ Run health checks against the Plumbline setup in the current project.
 
 ## What this does
 
-- `.plumbline.json` exists and parses cleanly (and how many checks are enabled)
+- `.plumbline.json` exists and parses cleanly (and how many checks are enabled, and how many citation tags are declared)
 - `.claude/rules/plumbline-cheatsheet.md` is committed
 - `.plumbline-budget.json` baseline file (optional — only reports its existence)
 - `.claude/settings.json` lists the plumbline plugin under `enabledPlugins`

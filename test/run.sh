@@ -33,15 +33,17 @@ run_case() {
   echo "ok: $name"
 }
 
-run_case "clean"                  "$fixtures/clean"                  0 ""
-run_case "invariant-covered"      "$fixtures/invariant-covered"      0 ""
-run_case "godoc-clean"            "$fixtures/godoc-clean"            0 ""
-run_case "jsdoc-clean"            "$fixtures/jsdoc-clean"            0 ""
-run_case "comment-hygiene"        "$fixtures/comment-hygiene"        2 "plumbline/comment-hygiene"
-run_case "source-missing-file"    "$fixtures/source-missing-file"    2 "plumbline/source-missing-file"
-run_case "source-missing-symbol"  "$fixtures/source-missing-symbol"  2 "plumbline/source-missing-symbol"
-run_case "source-missing-symbol-doublecolon" "$fixtures/source-missing-symbol-doublecolon" 2 "plumbline/source-missing-symbol"
-run_case "invariant-uncovered"    "$fixtures/invariant-uncovered"    2 "plumbline/blessed-invariant-uncovered"
+run_case "clean"                       "$fixtures/clean"                       0 ""
+run_case "license-header"              "$fixtures/license-header"              0 ""
+run_case "machine-directives"          "$fixtures/machine-directives"          0 ""
+run_case "docstring-opted-in"          "$fixtures/docstring-opted-in"          0 ""
+run_case "citation-file-resolved"      "$fixtures/citation-file-resolved"      0 ""
+run_case "citation-glob-resolved"      "$fixtures/citation-glob-resolved"      0 ""
+
+run_case "disallowed-comment"          "$fixtures/disallowed-comment"          2 "plumbline/comment-hygiene"
+run_case "docstring-not-opted-in"      "$fixtures/docstring-not-opted-in"      2 "plumbline/comment-hygiene"
+run_case "citation-file-unresolved"    "$fixtures/citation-file-unresolved"    2 "plumbline/citation-unresolved"
+run_case "citation-glob-unresolved"    "$fixtures/citation-glob-unresolved"    2 "plumbline/citation-unresolved"
 
 if [ $fail -eq 0 ]; then
   echo "---"

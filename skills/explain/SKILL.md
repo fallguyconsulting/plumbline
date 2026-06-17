@@ -1,19 +1,20 @@
 ---
 name: explain
-description: Show examples and rationale for a specific Plumbline check code or tag. Use to teach a project's contributors what a tag means and when to use it, or to look up the format of a specific violation.
+description: Show the canonical definition and examples for a Plumbline concept — a check code, the citations config, or the docstring opt-in marker.
 ---
 
 # /plumbline:explain
 
-Look up the meaning, examples, and recommended use of a specific Plumbline concept — a check code (`comment-hygiene`, `source-missing-file`, etc.) or a tag (`@constraint:`, `@deliberate:`, `@agent-contract`, etc.).
+Look up the canonical definition for a Plumbline concept.
 
 ## Usage
 
 ```
-/plumbline:explain                          # list available topics
+/plumbline:explain                                    # list available topics
 /plumbline:explain comment-hygiene
-/plumbline:explain @constraint:
-/plumbline:explain @blessed-invariant:
+/plumbline:explain citation-unresolved
+/plumbline:explain citations
+/plumbline:explain @plumbline:allow-docstrings
 ```
 
 ## Run
@@ -25,4 +26,4 @@ node "${CLAUDE_PLUGIN_ROOT%/}/bin/plumbline" explain "$topic"
 
 ## After the script runs
 
-Surface the explanation directly to the user. If they're trying to decide between two tags (e.g. `@constraint:` vs `@deliberate:`), suggest running `/plumbline:explain` for both and comparing the rationale sections.
+Surface the explanation directly to the user.

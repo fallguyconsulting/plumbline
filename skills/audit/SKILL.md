@@ -13,8 +13,8 @@ Run the Plumbline lint across the current project and analyze the findings.
 2. Capture the violation report (exit 0 = clean, 2 = violations, 1 = internal error).
 3. Group violations by check category and by file.
 4. Distinguish:
-   - **Mechanical** — `comment-hygiene` violations clear by tagging or removing prose; an agent can usually batch-fix these in one pass.
-   - **Structural** — `source-missing-file` and `source-missing-symbol` indicate stale `@source:` citations; `blessed-invariant-uncovered` indicates missing test coverage. Both require judgment to fix correctly.
+   - **comment-hygiene** — comments that are not a machine directive, not a configured citation, and not a docstring in an opt-in file. Default action is delete; a small share will be load-bearing and want conversion to an assertion / test / type / name. Use `/plumbline:suggest` for per-violation proposals.
+   - **citation-unresolved** — a comment uses a project-configured citation tag (e.g. `@concept:`, `@story:`), but the slug after the tag does not resolve. Either correct the slug, create the artifact at the resolved path, or remove the citation.
 5. Surface a summary back to the user with a proposed remediation plan; do not apply fixes without confirmation.
 
 ## Run
@@ -57,8 +57,7 @@ After the script completes, present:
 
 - The totals and category breakdown the script printed.
 - For each violation category, propose a remediation approach the user can authorize:
-  - **comment-hygiene** — usually a mechanical sweep; offer to batch-fix by tagging or removing prose.
-  - **source-missing-file / source-missing-symbol** — for each, propose either updating the `@source:` reference to the current canonical, marking `@diverged: true` with a reason, or removing the annotation if the mirror has been consolidated.
-  - **blessed-invariant-uncovered** — for each identifier, propose either adding a test that exercises it or removing the annotation if the invariant has been retired.
+  - **comment-hygiene** — usually a sweep; offer to batch-delete or run `/plumbline:suggest` for the few load-bearing ones that warrant conversion to code.
+  - **citation-unresolved** — for each tag, list the unresolved slugs and propose either correcting the slug, creating the missing artifact, or removing the citation.
 
 Do not begin applying fixes until the user authorizes a specific category or file scope.
