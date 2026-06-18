@@ -48,6 +48,7 @@ function main() {
 
   const file = event && event.tool_input && event.tool_input.file_path;
   if (!file || !fs.existsSync(file)) process.exit(0);
+  if (!findRepoRoot(file)) process.exit(0);
 
   const pluginRoot = process.env.CLAUDE_PLUGIN_ROOT;
   if (!pluginRoot) process.exit(0);
