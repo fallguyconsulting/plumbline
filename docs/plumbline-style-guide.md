@@ -77,7 +77,7 @@ def process(data):
 
 Semantically identical logic lives in exactly one place. When you find yourself writing logic that exists elsewhere, share it — do not copy it. The threshold for extraction is **semantic identity**, not a call-site count: if two sites must always change together, they are one behavior and belong in one definition.
 
-Plumbline does not admit a "intentionally similar but separate" carve-out. If two pieces of code look alike enough to invite the question, they are duplicating one behavior — share them. The older methodology offered a tracked-mirror form (`@source:`) for "coincidentally similar, semantically independent" code; experience showed it was used to license duplication and has been removed.
+Plumbline does not admit a "intentionally similar but separate" carve-out. If two pieces of code look alike enough to invite the question, they are duplicating one behavior — share them.
 
 Do not extract trivia. A one-line comprehension inlined at two sites is not a shared behavior; wrapping it in a utility adds a hop for nothing.
 
@@ -179,7 +179,7 @@ These can be added freely — they encode tooling state, not prose.
 
 ### Exemption 2 — Configured Citation Tags
 
-Projects that need a code-to-design link declare citation tags in `.plumbline.json`. Each entry pairs a tag with a structural resolution rule. A comment whose first significant line starts with the tag is allowed iff the slug after the tag resolves per the rule.
+Projects that need a code-to-design link declare citation tags in `.plumbline.json`. Each entry pairs a tag with a structural resolution rule.
 
 Two resolution modes:
 
@@ -198,7 +198,31 @@ Example `.plumbline.json` for a project using ok-planner:
 }
 ```
 
+**Citation comments are slug-only.** Each line in a citation comment block has the form `// @<tag>: <slug>` and nothing else — no em-dash tail, no continuation prose, no trailing punctuation. The slug names the design artifact; the artifact holds the explanation. Multiple clean citation lines may stack as one block:
+
+```go
+// @concept: cascade
+// @story: parker
+func resolveStaleFrame(...) { ... }
+```
+
+Each line's slug is independently checked for resolution. Mixing a citation line with a prose continuation line fails comment-hygiene — the prose belongs in the design doc, the code carries the link only.
+
+```go
+// WRONG — em-dash prose tail
+// @concept: cascade — staling propagates through structural edges
+
+// WRONG — citation line followed by prose continuation
+// @concept: cascade
+// staling propagates through structural edges
+
+// RIGHT — slug-only
+// @concept: cascade
+```
+
 A comment in source carrying `// @concept: claim-holder-guard` is allowed only when `.ok-planner/design/concepts/claim-holder-guard.md` exists. If the file does not exist, the lint reports `citation-unresolved`.
+
+Slug format: kebab-case (`[a-z0-9][a-z0-9-]*`). Lowercase, digits, hyphens.
 
 This is the only way to add project-specific allowed comment forms. There is no way to declare a tag without a resolution rule — every citation must come with a check, which closes the seam the older tag vocabulary admitted.
 
@@ -219,8 +243,6 @@ The opt-in is intentional: most files in a codebase are not public-API surfaces 
 ### Everything Else Is Residue
 
 Any comment that doesn't fit the three exemptions is residue. Delete on sight — including in code you didn't write (it will be regenerated as precedent otherwise).
-
-The methodology used to admit a tag vocabulary (`@constraint:`, `@deliberate:`, `@reason:`) for prose that named a real load-bearing fact. That vocabulary was structural in shape but seamful in practice — the agent decided "is this a constraint?" and the answer was always yes. It has been removed. The replacements are in code: `@constraint:` becomes an assertion with a message; `@deliberate:` becomes a test that fails when the obvious alternative is substituted, or a variable name that carries the intent; `@reason:` becomes the git history of the code that embodies the choice.
 
 ---
 
@@ -340,7 +362,7 @@ Configure lint/CI to check, at minimum:
 - [ ] Fast isolated checks cover the changed logic; the change was verified with them
 
 ### Comments
-- [ ] No comments except license headers, machine directives, configured citation tags whose slugs resolve, and JSDoc/GoDoc in files carrying the opt-in marker
+- [ ] No comments except license headers, machine directives, slug-only citation tags whose slugs resolve, and JSDoc/GoDoc in files carrying the opt-in marker
 - [ ] Any comment-hygiene violation cleared either by deleting or by converting the named constraint to an assertion / test / type / name
 
 ---

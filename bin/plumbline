@@ -276,6 +276,28 @@ function matchingCitation(firstLine, citations) {
   return null;
 }
 
+const PURE_CITATION_SLUG_RE = /^\s+[a-z0-9][a-z0-9-]*\s*$/;
+
+function isCleanCitationLine(line, citations) {
+  for (const c of citations) {
+    if (!line.startsWith(c.tag)) continue;
+    const rest = line.slice(c.tag.length);
+    if (PURE_CITATION_SLUG_RE.test(rest)) return true;
+  }
+  return false;
+}
+
+function isPureCitationBlock(comment, citations) {
+  const lines = comment.text.split('\n')
+    .map(stripBlockCommentPrefix)
+    .filter((l) => l.length > 0);
+  if (lines.length === 0) return false;
+  for (const line of lines) {
+    if (!isCleanCitationLine(line, citations)) return false;
+  }
+  return true;
+}
+
 function commentEndLine(c) {
   if (c.kind === 'line') return c.endLine || c.line;
   return c.line + c.text.split('\n').length - 1;
@@ -351,29 +373,28 @@ function isGoDocStyle(comment, allLines, grammar) {
   return decls.some((re) => re.test(nextLine));
 }
 
-function isCompliantComment(comment, allLines, grammar, citations, docstringsAllowed) {
-  const first = firstSignificantLine(comment.text);
-  if (!first) return true;
-  if (isMachineDirective(first)) return true;
-  if (matchingCitation(first, citations)) return true;
-  if (docstringsAllowed) {
-    if (isJsDocStyle(comment, allLines, grammar)) return true;
-    if (isGoDocStyle(comment, allLines, grammar)) return true;
-  }
-  return false;
-}
-
 function checkCommentHygiene(filePath, content, grammar, config) {
   const violations = [];
   const allLines = content.split('\n');
   const docstringsAllowed = hasDocstringOptIn(content);
   for (const c of extractComments(content, grammar)) {
-    if (isCompliantComment(c, allLines, grammar, config.citations, docstringsAllowed)) continue;
+    const first = firstSignificantLine(c.text);
+    if (!first) continue;
+    if (isMachineDirective(first)) continue;
+    if (isPureCitationBlock(c, config.citations)) continue;
+    if (docstringsAllowed) {
+      if (isJsDocStyle(c, allLines, grammar)) continue;
+      if (isGoDocStyle(c, allLines, grammar)) continue;
+    }
+    const firstIsCitationTag = matchingCitation(first, config.citations) !== null;
+    const message = firstIsCitationTag
+      ? 'citation comment must be slug-only — each line is `@<tag>: <slug>` and nothing else (no em-dash tail, no continuation prose, no trailing punctuation; the design doc holds the explanation)'
+      : 'comment is not permitted (not a machine directive, not a configured citation, no docstring opt-in)';
     violations.push({
       file: filePath,
       line: c.line,
       code: 'comment-hygiene',
-      message: 'comment is not permitted (not a machine directive, not a configured citation, no docstring opt-in)',
+      message,
     });
   }
   return violations;
@@ -551,10 +572,17 @@ const EXPLAIN_TOPICS = {
      / ts-nocheck, noqa, pylint:, tslint:, biome-, prettier-, deno-, nolint), build
      tags (go:), generated-file markers, C-pragmas, shebangs.
 
-  2. Project-configured citation tags from .plumbline.json's "citations" array.
-     Each entry declares { tag, file_template } or { tag, appears_in_glob }.
-     A comment whose first significant line starts with the tag is allowed
-     iff the slug after the tag resolves per the entry's rule.
+  2. Project-configured citation tags from .plumbline.json's "citations" array,
+     used in slug-only form. Each entry declares { tag, file_template } or
+     { tag, appears_in_glob }. A citation comment block consists of one or more
+     adjacent lines, EACH of the form "@<tag>: <slug>" with nothing else after
+     the slug — no em-dash tail, no continuation prose, no trailing punctuation.
+     The slug names the design artifact; the design doc holds the explanation.
+     Multiple clean citation lines stacked together (e.g. "@concept: cascade"
+     immediately followed by "@story: parker") form one valid block. Each line's
+     slug is independently checked for resolution. Mixing a citation line with
+     a prose continuation line fails the whole block — the prose belongs in
+     the design doc, the code carries the link only.
 
   3. Documentation comments — only when the file carries the opt-in marker
      ${DOCSTRING_OPT_IN_MARKER} as a comment. With the marker, JSDoc-style block
@@ -581,13 +609,23 @@ project-specific structured-tag exemptions.
   Each entry takes the shape:
     { "tag": "@concept:",  "file_template": ".ok-planner/design/concepts/{slug}.md" }
   or:
-    { "tag": "@blessed-invariant:", "appears_in_glob": "**/*_test.*,test_*.py" }
+    { "tag": "@my-invariant:", "appears_in_glob": "**/*_test.*,test_*.py" }
 
   Exactly one of file_template or appears_in_glob must be set. file_template
   must contain the literal {slug}, which is substituted with the parsed slug
   to form a repo-rooted path that must exist. appears_in_glob is a
   comma-separated set of repo-rooted globs (** and * supported); the slug
   must appear (word-boundary match) in at least one matching file.
+
+  Citation comments are slug-only at the code site. Each line in a citation
+  comment block has the form "@<tag>: <slug>" with nothing else after the
+  slug — no em-dash tail, no continuation prose, no trailing punctuation.
+  The slug names the design artifact (or the invariant); the explanation
+  lives in the artifact itself, not at the code site. Multiple clean
+  citation lines may stack as one block, but mixing a citation line with
+  prose continuation fails comment-hygiene.
+
+  Slug format: kebab-case ([a-z0-9][a-z0-9-]*). Lowercase, digits, hyphens.
 
   Plumbline ships zero default citations. Projects that need design-artifact
   tracing add the entries themselves — typically by running plumbline starter,

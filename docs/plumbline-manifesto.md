@@ -67,7 +67,7 @@ The property that makes an abstraction agent-friendly is not its depth or its la
 
 Dynamic indirection is forbidden not because it is hard to read but because it is invisible to grep, to the type checker, and to static analysis — it defeats exactly the machinery that makes shared code safe to edit.
 
-Plumbline is strict DRY without exception. There is no "this similar-looking code is intentionally separate" carve-out — if two sites must change together they share; if they don't, they aren't duplicating a behavior in the first place. The methodology used to admit a narrow `@source:` mirror form for "coincidentally similar but semantically independent" code; experience showed the carve-out was used to license what was actually duplication, and it has been removed.
+Plumbline is strict DRY without exception. There is no "this similar-looking code is intentionally separate" carve-out — if two sites must change together they share; if they don't, they aren't duplicating a behavior in the first place.
 
 ### 3. Every Contract Has a Mechanical Check
 
@@ -121,10 +121,8 @@ Most comment volume in agent-written code is **generation residue**: narration a
 The rule:
 
 - **By default, comments are not permitted in source files.** Load-bearing information — a constraint, an invariant, a deliberate-choice guard — belongs in a code form an agent cannot route around: an assertion with a message, a test whose name carries the rule, a type that enforces the shape, a function or variable name that carries the intent.
-- **Three narrow exemptions.** Machine directives (license headers, lint suppressions, build tags, generated-file markers, shebangs) — these are tooling syntax, not prose. Project-configured citation tags from `.plumbline.json` — each pairs a tag with a structural resolution rule, so a comment using the tag is allowed only if its slug actually resolves to a file or appears in a configured set. Documentation comments — JSDoc/GoDoc adjacent to declarations, only in files carrying the opt-in marker `@plumbline:allow-docstrings`.
+- **Three narrow exemptions.** Machine directives (license headers, lint suppressions, build tags, generated-file markers, shebangs) — these are tooling syntax, not prose. Project-configured citation tags from `.plumbline.json` in slug-only form — each pairs a tag with a structural resolution rule, and each line in a citation comment is `@<tag>: <slug>` and nothing else (no em-dash tail, no continuation prose, no trailing punctuation). The slug names the artifact; the artifact holds the explanation. Documentation comments — JSDoc/GoDoc adjacent to declarations, only in files carrying the opt-in marker `@plumbline:allow-docstrings`.
 - **Everything else is residue.** The default action is delete, including in code you didn't write — it will be regenerated as precedent otherwise.
-
-The methodology used to admit a tag vocabulary — `@constraint:`, `@deliberate:`, `@reason:` — for prose that named a real load-bearing fact. Experience showed the tags were judgment-call exemptions in disguise: the agent decided "is this a constraint?" and the answer was always yes. The vocabulary was structural in shape but seamful in practice. Plumbline no longer offers it. Constraints belong in assertions; deliberate choices belong in test names; reasons belong in the git history of the code that embodies them.
 
 ---
 
