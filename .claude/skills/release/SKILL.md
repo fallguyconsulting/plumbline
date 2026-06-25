@@ -65,7 +65,12 @@ If `docs/plumbline-cheatsheet.md` is among the changed files, mention in the fin
 
 ### 5. Apply the bump
 
-Edit the `version` field in `.claude-plugin/plugin.json` to the new version. Use the Edit tool for a precise single-line change so the file's formatting is preserved. Do not touch any other field.
+The version string is duplicated in two places — both must move together so `/plumbline:version` keeps reporting the truth:
+
+1. The `version` field in `.claude-plugin/plugin.json` (the plugin manifest, source of truth).
+2. The `VERSION` constant in `bin/plumbline` (what `plumbline version` echoes; near the top of the file as `const VERSION = '...';`).
+
+Edit both with the Edit tool — single-line, precise changes that preserve formatting. Do not touch any other field or constant. After the edits, run `node bin/plumbline version` and confirm it prints the new version; if it doesn't, fix the `VERSION` constant before continuing. Any future location that hardcodes the version also belongs in this step — grep for the previous version string to catch drift (`git grep -n "<prev>"`).
 
 ### 6. Commit
 
