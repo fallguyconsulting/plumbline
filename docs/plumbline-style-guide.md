@@ -160,9 +160,11 @@ The assertion message is the documentation; the test pins the rule. A future age
 
 ### The Rule: No Comments
 
-Code is the documentation. By default, comments are not permitted in source files. The lint catches every comment and reports it as a violation unless it falls into one of the three structural exemptions below. The default action for any comment-hygiene violation is **delete**.
+Code is the documentation. **Do not write comments** — no narration, no rationale lines, no "this does X", no TODOs. The exemptions below are not invitations; a comment is permitted only when something other than the author's own judgment requires it (tooling needs a directive; an external standard names a tag this code must carry; the file is a public-API surface with the docstrings marker already set). The lint catches leftovers, but the rule is prevention, not cleanup.
 
 Most comment volume in agent-written code is **generation residue** — narration addressed to the change's reviewer rather than the code's next reader ("handle the error case", "this ensures X"). Some small share names a real load-bearing fact. That share belongs in code: an assertion, a test, a type, a name. None of it belongs in a comment.
+
+The default action for any comment-hygiene violation — yours or pre-existing — is **delete**.
 
 ### Exemption 1 — Machine Directives
 
@@ -180,6 +182,8 @@ These can be added freely — they encode tooling state, not prose.
 ### Exemption 2 — Configured Citation Tags
 
 Projects that need a code-to-design link declare citation tags in `.plumbline.json`. Each entry pairs a tag with a structural resolution rule.
+
+**Write a citation comment only when a separate standard directs you to link this code to a specific design artifact** — e.g. an ok-planner project whose convention is to cite the concept/story/decision that drove the code. Never invent a tag, never add one on your own initiative as a substitute for the prose comment you would have written otherwise. The exemption exists to carry a link the external standard requires; it is not a license to annotate.
 
 Two resolution modes:
 
