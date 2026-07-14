@@ -52,7 +52,6 @@ Actionable conventions for this codebase under the Plumbline methodology. The fu
 
 - Shared-code change: edit the one definition, let compiler + contract suites enumerate blast radius, fix all consumers in the same change
 - Idiom change: sweep all instances in the same change, add lint so the old idiom cannot return
-- Update `feature-index.md` when features/dependencies change
 
 ## Tooling
 

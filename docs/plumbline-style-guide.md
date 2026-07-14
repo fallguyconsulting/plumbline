@@ -40,10 +40,6 @@ features/orders/
 
 Do not separate tests into a parallel directory tree.
 
-### Feature Index
-
-Maintain a `feature-index.md` at the repository root mapping features to their primary directories, layer, dependencies, and one-line purpose. Update it when adding a feature, changing a feature's dependencies, or changing ownership. It is the cheap navigation surface for a cold session.
-
 ---
 
 ## Code Structure
